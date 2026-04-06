@@ -4,8 +4,7 @@ A powerful CLI tool to help you respond to text messages faster using AI-powered
 
 ## Features
 
-- 💻 **CLI Tool** - Generate replies directly from your terminal.
-- 🏠 **Truly Local AI** - Support for Ollama to run 100% locally.
+- 🏠 **Truly Local AI** - Powered by [Ollama](https://ollama.com) to run everything on your machine.
 - 🎭 **Personal Vibe Mimicry** - Extracts your iMessage style to sound like *you*.
 - 🎨 **Personal Style Matching** - Uses your sent messages as examples.
 - 📋 **Clipboard Integration** - Auto-detect messages from your clipboard.
@@ -16,7 +15,7 @@ A powerful CLI tool to help you respond to text messages faster using AI-powered
 
 ```
 VibeTexting/
-├── vibetext.py              # Main CLI Tool (Local/Cloud)
+├── vibetext.py              # Main CLI Tool (Ollama-powered)
 ├── extract_imessage_vibe.py  # Mac-only script to learn your style from iMessage
 ├── pyproject.toml           # Python package configuration
 └── README.md
@@ -24,7 +23,17 @@ VibeTexting/
 
 ## Installation
 
-You can install the VibeTexting CLI globally on your Mac/PC:
+### 1. Install Prerequisites
+
+1.  **Ollama**: Download and install from [ollama.com](https://ollama.com).
+2.  **Pull a Model**: By default, VibeTexting uses `llama3`.
+    ```bash
+    ollama pull llama3
+    ```
+
+### 2. Install VibeTexting
+
+You can install the CLI globally on your Mac/PC:
 
 ```bash
 # Clone the repository
@@ -37,31 +46,14 @@ pip install -e .
 
 ## Quick Start
 
-### 1. Using Cloud AI (Groq)
+### 1. Run the CLI
 
-1. Get a free API key from [Groq Console](https://console.groq.com).
-2. Create a `.env` file in the root directory:
-   ```bash
-   echo "GROQ_API_KEY=your_key_here" > .env
-   ```
-3. Run the CLI:
-   ```bash
-   vibetexting
-   ```
+Start the generator by simply running:
+```bash
+vibetexting
+```
 
-### 2. Using Local AI (Ollama)
-
-1. Install [Ollama](https://ollama.com).
-2. Pull a model (e.g., Llama 3):
-   ```bash
-   ollama pull llama3
-   ```
-3. Run the CLI with the `--local` flag:
-   ```bash
-   vibetexting --local
-   ```
-
-### 3. Training on Your Style (Mac Only)
+### 2. Training on Your Style (Mac Only)
 
 1. Run the extraction script:
    ```bash
@@ -105,7 +97,6 @@ vibetexting --help
 
 | Argument | Description |
 |----------|-------------|
-| `--local` | Use local Ollama instead of Groq cloud API. |
 | `--model` | Specify the Ollama model to use (default: `llama3`). |
 | `--vibe`  | Path to a specific vibe profile text file. |
 | `--chat` | Contact first name, last name, phone number, or email to load recent chat history for. |
