@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Read(//Users/kshrugal/Desktop/VibeTexting/**)",
-      "Bash(open *)"
-    ]
-  },
-  "$version": 3
-}

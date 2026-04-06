@@ -14,7 +14,7 @@ from typing import Optional, List
 from dotenv import load_dotenv
 
 # Load environment variables (for Groq API key)
-load_dotenv(os.path.join(os.path.dirname(__file__), 'backend', '.env'))
+load_dotenv()
 
 # Configuration
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
