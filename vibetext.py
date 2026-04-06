@@ -114,19 +114,22 @@ def main():
     parser = argparse.ArgumentParser(description="VibeText CLI - Local AI Text Responder")
     parser.add_argument("--local", action="store_true", help="Use local Ollama instead of Groq")
     parser.add_argument("--model", default="llama3", help="Ollama model to use (default: llama3)")
-    parser.add_argument("--vibe", help="Path to your extracted vibe profile text file (e.g. my_vibe_profile.txt)")
+    parser.add_argument("--vibe", help="Path to your extracted vibe profile (default: my_vibe_profile.txt if it exists)")
     args = parser.parse_args()
 
     print("\n--- VibeText CLI ---")
     
+    vibe_path = args.vibe or "my_vibe_profile.txt"
     vibe_content = None
-    if args.vibe:
+    if os.path.exists(vibe_path):
         try:
-            with open(args.vibe, "r", encoding="utf-8") as f:
+            with open(vibe_path, "r", encoding="utf-8") as f:
                 vibe_content = f.read().strip()
-            print(f"✅ Loaded personal vibe profile ({len(vibe_content.splitlines())} examples)")
+            print(f"✅ Loaded personal vibe profile from {vibe_path} ({len(vibe_content.splitlines())} examples)")
         except Exception as e:
             print(f"⚠️ Warning: Could not load vibe profile: {e}")
+    elif args.vibe:
+        print(f"⚠️ Warning: Vibe profile not found at {args.vibe}")
             
     # 1. Get Original Message
     clipboard = get_clipboard_text()

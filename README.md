@@ -9,33 +9,54 @@ An iOS app that helps you respond to text messages faster using AI-powered tone-
 ## Features
 
 - 🎤 **Voice Input** - Dictate your reply using iOS Speech framework
+- 💻 **CLI Tool** - Generate replies directly from your terminal
+- 🏠 **Truly Local AI** - Support for Ollama to run 100% locally
+- 🎭 **Personal Vibe Mimicry** - Extracts your iMessage style to sound like *you*
 - 🎨 **5 Tone Options** - Casual, Professional, Funny, Friendly, Concise
-- 🤖 **AI-Powered** - Fast responses via Groq API (Llama 3.1)
-- 📋 **Clipboard Detection** - Auto-detect messages from clipboard
-- 💾 **Local Storage** - History and favorites persistence
-- 🚀 **Native UX** - SwiftUI with 1-2 tap response flow
+- 📋 **Clipboard Integration** - Auto-detect messages from clipboard on iOS & Mac
+- 🚀 **Native UX** - SwiftUI and Python CLI flows
 
 ## Project Structure
 
 ```
 VibeTexting/
-├── iOS/
-│   └── VibeTexting/
-│       ├── VibeTextingApp.swift    # App entry point
-│       ├── ContentView.swift        # Main UI screen
-│       ├── HistoryView.swift        # Reply history view
-│       ├── Models.swift             # Data models
-│       ├── APIManager.swift         # Backend API client
-│       ├── VoiceInputManager.swift  # Speech recognition
-│       ├── ClipboardManager.swift   # Clipboard monitoring
-│       ├── StorageManager.swift     # Local persistence
-│       └── Info.plist               # App config & permissions
-├── backend/
-│   ├── main.py                      # FastAPI server
-│   ├── requirements.txt             # Python dependencies
-│   └── .env                         # API keys (create this)
-└── README.md                        # This file
+├── vibetext.py              # CLI Tool (Local/Cloud)
+├── extract_imessage_vibe.py  # Mac-only script to learn your style
+├── pyproject.toml           # Python package configuration
+├── iOS/                     # Swift/SwiftUI iOS App
+├── backend/                 # FastAPI server for iOS App
+└── README.md
 ```
+
+## CLI Installation (Open Source Friendly)
+
+You can install the VibeTexting CLI globally on your Mac/PC:
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/VibeTexting.git
+cd VibeTexting
+
+# Install as a local package
+pip install -e .
+```
+
+Now you can run the following commands from anywhere:
+- `vibetexting` - Start the generator
+- `vibe-extract` - (Mac only) Learn your texting style from iMessage
+
+### Running Locally with Ollama
+
+1. Install [Ollama](https://ollama.com)
+2. Pull a model: `ollama pull llama3`
+3. Run the CLI: `vibetexting --local`
+
+### Training the AI on your style (Mac Only)
+
+1. Run `vibe-extract`.
+2. (Follow the prompt to grant "Full Disk Access" to Terminal in System Settings).
+3. The script creates `my_vibe_profile.txt`.
+4. Run `vibetexting --local` and it will automatically load your profile to mimic you!
 
 ## Quick Start
 

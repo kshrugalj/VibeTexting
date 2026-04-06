@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vibetexting"
+version = "0.1.0"
+description = "AI-powered text response generator with personal style mimicry"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "httpx",
+    "python-dotenv",
+]
+
+[project.scripts]
+vibetexting = "vibetext:main"
+vibe-extract = "extract_imessage_vibe:extract_vibe"
+
+[tool.setuptools]
+py-modules = ["vibetext", "extract_imessage_vibe"]
