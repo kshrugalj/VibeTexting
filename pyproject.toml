@@ -8,14 +8,11 @@ version = "0.1.0"
 description = "AI-powered text response generator with personal style mimicry"
 readme = "README.md"
 requires-python = ">=3.8"
-dependencies = [
-    "httpx",
-    "python-dotenv",
-]
+dependencies = []
 
 [project.scripts]
 vibetexting = "vibetext:main"
-vibe-extract = "extract_imessage_vibe:extract_vibe"
+vibe-extract = "extract_imessage_vibe:main"
 
 [tool.setuptools]
 py-modules = ["vibetext", "extract_imessage_vibe"]

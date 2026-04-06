@@ -1,14 +1,15 @@
 # VibeTexting CLI 🎤
 
-A powerful CLI tool to help you respond to text messages faster using AI-powered tone-based response generation. It can run locally with Ollama or via Groq's cloud API.
+A powerful CLI tool to help you respond to text messages faster using AI-powered style-matched response generation. It can run locally with Ollama or via Groq's cloud API.
 
 ## Features
 
 - 💻 **CLI Tool** - Generate replies directly from your terminal.
 - 🏠 **Truly Local AI** - Support for Ollama to run 100% locally.
 - 🎭 **Personal Vibe Mimicry** - Extracts your iMessage style to sound like *you*.
-- 🎨 **5 Tone Options** - Casual, Professional, Funny, Friendly, Concise.
+- 🎨 **Personal Style Matching** - Uses your sent messages as examples.
 - 📋 **Clipboard Integration** - Auto-detect messages from your clipboard.
+- 🧵 **Chat History Context** - Loads recent iMessage history for the person you're texting, with a Contacts.app fallback for saved names.
 - 🛠️ **Developer Friendly** - Easy to install and extend.
 
 ## Project Structure
@@ -68,7 +69,33 @@ pip install -e .
    ```
 2. **Note:** You will be prompted to grant "Full Disk Access" to Terminal (or your IDE) in *System Settings > Privacy & Security > Full Disk Access* to allow the script to read your iMessage database.
 3. The script creates `my_vibe_profile.txt`.
+4. It also exports recent chat history to `my_chat_history.txt`.
 4. Run `vibetexting` and it will automatically detect this file to mimic your personal texting style!
+
+### Pulling Chat History from Messages
+
+Use `vibe-extract` with optional filters when you want to mimic one specific conversation style:
+
+```bash
+# Default: sample your sent style + export recent mixed chat history
+vibe-extract
+
+# Pull history for one person/chat name/number
+vibe-extract --chat "mom"
+
+# Export more context into a custom file
+vibe-extract --history-limit 1000 --history-out mom_history.txt --chat "+1415"
+```
+
+Useful flags:
+
+| Argument | Description |
+|----------|-------------|
+| `--chat` | Filter by contact handle (phone/email) or chat display name. |
+| `--limit` | Number of your sent messages sampled for `my_vibe_profile.txt` (default: `150`). |
+| `--history-limit` | Number of recent messages exported for chat history (default: `300`). |
+| `--history-full` | Export the full chat history instead of a limited slice. |
+| `--history-out` | Output file for chat history export (default: `my_chat_history.txt`). |
 
 ## Usage Options
 
@@ -81,24 +108,15 @@ vibetexting --help
 | `--local` | Use local Ollama instead of Groq cloud API. |
 | `--model` | Specify the Ollama model to use (default: `llama3`). |
 | `--vibe`  | Path to a specific vibe profile text file. |
-
-## Tone Options
-
-| Tone | Use Case |
-|------|----------|
-| Casual | Friends, family, relaxed chats. |
-| Professional | Work, business, or formal inquiries. |
-| Funny | Jokes, playful banter, memes. |
-| Friendly | Warm, supportive, and kind. |
-| Concise | Quick acknowledgments and "to the point" replies. |
+| `--chat` | Contact first name, last name, phone number, or email to load recent chat history for. |
+| `--history-limit` | Number of recent messages to include from that chat (default: `20`). |
 
 ## How it Works
 
 1. **Input Detection:** The tool automatically pulls the last text from your clipboard.
-2. **Context Selection:** You can choose to provide a "Draft Reply" (what you *want* to say) to guide the AI.
-3. **Tone Mapping:** Select one of the 5 tones to wrap your message.
-4. **Vibe Mimicry:** If a `my_vibe_profile.txt` exists, the AI uses "Few-Shot Prompting" to match your specific vocabulary and sentence structure.
-5. **Output:** The generated reply is printed to the terminal for you to copy.
+2. **Chat Lookup:** You can provide a contact first name, last name, phone number, or email so the tool loads recent iMessage history for that person, and it will try Contacts.app if Messages only stores a number or email.
+3. **Vibe Mimicry:** If a `my_vibe_profile.txt` exists, the AI uses "Few-Shot Prompting" to match your specific vocabulary and sentence structure.
+4. **Output:** The generated reply is printed to the terminal for you to copy.
 
 ## Contributing
 
