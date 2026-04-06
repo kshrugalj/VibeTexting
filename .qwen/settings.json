@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(qwen *)",
+      "Bash(mkdir *)"
+    ]
+  },
+  "$version": 3
+}

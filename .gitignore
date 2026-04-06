@@ -1,0 +1,14 @@
+# Python
+backend/venv/
+backend/__pycache__/
+*.pyc
+.env
+
+# iOS
+iOS/VibeTexting.xcodeproj/xcuserdata/
+iOS/VibeTexting.xcodeproj/project.xcworkspace/xcuserdata/
+.DS_Store
+
+# Skill
+github-devops/
+github-devops.skill
