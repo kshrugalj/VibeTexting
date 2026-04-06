@@ -18,7 +18,6 @@ VibeTexting/
 ├── vibetext.py              # Main CLI Tool (Local/Cloud)
 ├── extract_imessage_vibe.py  # Mac-only script to learn your style from iMessage
 ├── pyproject.toml           # Python package configuration
-├── backend/                 # FastAPI server (optional, used by mobile apps)
 └── README.md
 ```
 
