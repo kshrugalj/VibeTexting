@@ -1,192 +1,112 @@
-# VibeTexting 🎤
+# VibeTexting CLI 🎤
 
-An iOS app that helps you respond to text messages faster using AI-powered tone-based response generation.
-
-![iOS](https://img.shields.io/badge/iOS-16.0+-blue)
-![Swift](https://img.shields.io/badge/Swift-5.9-orange)
-![Platform](https://img.shields.io/badge/Platform-iOS-lightgrey)
+A powerful CLI tool to help you respond to text messages faster using AI-powered tone-based response generation. It can run locally with Ollama or via Groq's cloud API.
 
 ## Features
 
-- 🎤 **Voice Input** - Dictate your reply using iOS Speech framework
-- 💻 **CLI Tool** - Generate replies directly from your terminal
-- 🏠 **Truly Local AI** - Support for Ollama to run 100% locally
-- 🎭 **Personal Vibe Mimicry** - Extracts your iMessage style to sound like *you*
-- 🎨 **5 Tone Options** - Casual, Professional, Funny, Friendly, Concise
-- 📋 **Clipboard Integration** - Auto-detect messages from clipboard on iOS & Mac
-- 🚀 **Native UX** - SwiftUI and Python CLI flows
+- 💻 **CLI Tool** - Generate replies directly from your terminal.
+- 🏠 **Truly Local AI** - Support for Ollama to run 100% locally.
+- 🎭 **Personal Vibe Mimicry** - Extracts your iMessage style to sound like *you*.
+- 🎨 **5 Tone Options** - Casual, Professional, Funny, Friendly, Concise.
+- 📋 **Clipboard Integration** - Auto-detect messages from your clipboard.
+- 🛠️ **Developer Friendly** - Easy to install and extend.
 
 ## Project Structure
 
 ```
 VibeTexting/
-├── vibetext.py              # CLI Tool (Local/Cloud)
-├── extract_imessage_vibe.py  # Mac-only script to learn your style
+├── vibetext.py              # Main CLI Tool (Local/Cloud)
+├── extract_imessage_vibe.py  # Mac-only script to learn your style from iMessage
 ├── pyproject.toml           # Python package configuration
-├── iOS/                     # Swift/SwiftUI iOS App
-├── backend/                 # FastAPI server for iOS App
+├── backend/                 # FastAPI server (optional, used by mobile apps)
 └── README.md
 ```
 
-## CLI Installation (Open Source Friendly)
+## Installation
 
 You can install the VibeTexting CLI globally on your Mac/PC:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/VibeTexting.git
+git clone https://github.com/kshrugalj/VibeTexting.git
 cd VibeTexting
 
 # Install as a local package
 pip install -e .
 ```
 
-Now you can run the following commands from anywhere:
-- `vibetexting` - Start the generator
-- `vibe-extract` - (Mac only) Learn your texting style from iMessage
-
-### Running Locally with Ollama
-
-1. Install [Ollama](https://ollama.com)
-2. Pull a model: `ollama pull llama3`
-3. Run the CLI: `vibetexting --local`
-
-### Training the AI on your style (Mac Only)
-
-1. Run `vibe-extract`.
-2. (Follow the prompt to grant "Full Disk Access" to Terminal in System Settings).
-3. The script creates `my_vibe_profile.txt`.
-4. Run `vibetexting --local` and it will automatically load your profile to mimic you!
-
 ## Quick Start
 
-### 1. Set Up Backend
+### 1. Using Cloud AI (Groq)
+
+1. Get a free API key from [Groq Console](https://console.groq.com).
+2. Create a `.env` file in the root directory:
+   ```bash
+   echo "GROQ_API_KEY=your_key_here" > .env
+   ```
+3. Run the CLI:
+   ```bash
+   vibetexting
+   ```
+
+### 2. Using Local AI (Ollama)
+
+1. Install [Ollama](https://ollama.com).
+2. Pull a model (e.g., Llama 3):
+   ```bash
+   ollama pull llama3
+   ```
+3. Run the CLI with the `--local` flag:
+   ```bash
+   vibetexting --local
+   ```
+
+### 3. Training on Your Style (Mac Only)
+
+1. Run the extraction script:
+   ```bash
+   vibe-extract
+   ```
+2. **Note:** You will be prompted to grant "Full Disk Access" to Terminal (or your IDE) in *System Settings > Privacy & Security > Full Disk Access* to allow the script to read your iMessage database.
+3. The script creates `my_vibe_profile.txt`.
+4. Run `vibetexting` and it will automatically detect this file to mimic your personal texting style!
+
+## Usage Options
 
 ```bash
-cd backend
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# Create .env file with your Groq API key
-echo "GROQ_API_KEY=your_key_here" > .env
-
-# Start server
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+vibetexting --help
 ```
 
-Get a Groq API key: https://console.groq.com
-
-### 2. Set Up iOS App
-
-```bash
-cd iOS/VibeTexting
-open VibeTexting.xcodeproj
-```
-
-In Xcode:
-1. Select your development team
-2. Update `APIManager.swift` with your backend URL
-3. Build and run (⌘R)
-
-### 3. Use the App
-
-1. Copy a text message to clipboard
-2. Open VibeTexting - it detects the clipboard content
-3. (Optional) Tap mic to dictate your draft reply
-4. Select a tone
-5. Tap "Generate Reply"
-6. Copy or share the AI-generated response
-
-## API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Server health check |
-| `/generate-reply` | POST | Generate AI response |
-| `/generate-alternatives` | POST | Get 3 alternative phrasings |
+| Argument | Description |
+|----------|-------------|
+| `--local` | Use local Ollama instead of Groq cloud API. |
+| `--model` | Specify the Ollama model to use (default: `llama3`). |
+| `--vibe`  | Path to a specific vibe profile text file. |
 
 ## Tone Options
 
-| Tone | Icon | Use Case |
-|------|------|----------|
-| Casual | 😎 | Friends, family |
-| Professional | 💼 | Work, business |
-| Funny | 😄 | Jokes, playful chats |
-| Friendly | 🤗 | Warm, supportive |
-| Concise | ⚡ | Quick acknowledgments |
+| Tone | Use Case |
+|------|----------|
+| Casual | Friends, family, relaxed chats. |
+| Professional | Work, business, or formal inquiries. |
+| Funny | Jokes, playful banter, memes. |
+| Friendly | Warm, supportive, and kind. |
+| Concise | Quick acknowledgments and "to the point" replies. |
 
-## Permissions Required
+## How it Works
 
-- **Speech Recognition** - For voice-to-text input
-- **Clipboard Access** - To detect incoming messages
-
-## UX Best Practices
-
-✅ **Minimal Taps** - 1-2 taps to get a reply  
-✅ **Visual Feedback** - Recording & loading states  
-✅ **Clear Icons** - Tone indicators with emoji  
-✅ **Error Handling** - Helpful error messages  
-✅ **Large Targets** - Easy-to-tap buttons  
-
-## Roadmap
-
-- [ ] Share Sheet extension for direct messaging integration
-- [ ] Custom tone presets
-- [ ] Multiple language support
-- [ ] Widget for quick access
-- [ ] Apple Watch companion
-- [ ] End-to-end encryption for privacy
-
-## Tech Stack
-
-**iOS App:**
-- SwiftUI
-- iOS Speech Framework (SFSpeechRecognizer)
-- URLSession for networking
-- UserDefaults for local storage
-
-**Backend:**
-- FastAPI
-- Uvicorn (ASGI server)
-- Groq API (Llama 3.1)
-- httpx for async HTTP
-
-## Development
-
-### Running Tests
-
-```bash
-# Backend tests (if added)
-pytest
-
-# iOS tests
-# Run in Xcode: Product → Test
-```
-
-### Debugging
-
-For local development, use your Mac's IP address as the backend URL:
-
-```swift
-// In APIManager.swift
-private let baseURL = "http://192.168.1.XXX:8000"
-```
-
-Ensure both devices are on the same network.
-
-## License
-
-MIT License - feel free to use this project for learning or building your own apps.
+1. **Input Detection:** The tool automatically pulls the last text from your clipboard.
+2. **Context Selection:** You can choose to provide a "Draft Reply" (what you *want* to say) to guide the AI.
+3. **Tone Mapping:** Select one of the 5 tones to wrap your message.
+4. **Vibe Mimicry:** If a `my_vibe_profile.txt` exists, the AI uses "Few-Shot Prompting" to match your specific vocabulary and sentence structure.
+5. **Output:** The generated reply is printed to the terminal for you to copy.
 
 ## Contributing
 
-Contributions welcome! Areas for improvement:
-- Share Sheet extension
-- Additional AI providers (OpenAI, Anthropic)
-- UI/UX refinements
-- Accessibility improvements
+Future plans include removing the copy-paste requirement and using screen-sharing/computer vision technology to detect messages automatically. 
 
----
+Feel free to open issues or submit PRs!
 
-Built with ❤️ for faster texting
+## License
+
+MIT License
