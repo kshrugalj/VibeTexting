@@ -508,6 +508,9 @@ def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None) -> t
             LEFT JOIN chat c ON c.ROWID = cmj.chat_id
             WHERE m.text IS NOT NULL
               AND m.text != ''
+              AND m.text NOT LIKE '%http%'
+              AND m.text NOT LIKE '%www.%'
+              AND m.associated_message_guid IS NULL
               AND c.ROWID IN ({placeholders})
             ORDER BY m.date DESC
             {'' if limit is None else 'LIMIT ?'}

@@ -25,6 +25,7 @@ wheels/
 
 # Personal data
 my_vibe_profile.txt
+my_chat_history.txt
 
 # Tools
 .qwen/

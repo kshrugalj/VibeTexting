@@ -73,8 +73,9 @@ def extract_vibe(limit=150, chat_filter=None, history_limit=300, history_out="my
               AND m.text != ''
               AND length(m.text) > 2
               AND length(m.text) < 300
-              AND m.text NOT LIKE 'http%'
-              AND m.text NOT LIKE 'www.%'
+              AND m.text NOT LIKE '%http%'
+              AND m.text NOT LIKE '%www.%'
+              AND m.associated_message_guid IS NULL
               AND ifnull(m.cache_has_attachments, 0) = 0
               {match_clause}
             ORDER BY m.date DESC
@@ -84,6 +85,8 @@ def extract_vibe(limit=150, chat_filter=None, history_limit=300, history_out="my
         rows = cursor.fetchall()
 
         # Exclude Apple's auto-generated tapback messages (Loved "...", Liked "...")
+        # Note: associated_message_guid IS NULL already handles modern tapbacks,
+        # but we keep this for legacy or edge cases.
         messages = [
             row[0]
             for row in rows
@@ -121,6 +124,9 @@ def extract_vibe(limit=150, chat_filter=None, history_limit=300, history_out="my
             LEFT JOIN chat c ON c.ROWID = cmj.chat_id
             WHERE m.text IS NOT NULL
               AND m.text != ''
+              AND m.text NOT LIKE '%http%'
+              AND m.text NOT LIKE '%www.%'
+              AND m.associated_message_guid IS NULL
               {'' if history_full else 'AND m.is_from_me = 1'}
               {match_clause}
             ORDER BY m.date DESC
