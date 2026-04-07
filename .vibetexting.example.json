@@ -1,0 +1,16 @@
+{
+  "name": "Akshay",
+  "model": "llama3",
+  "vibe": "my_vibe_profile.txt",
+  "default_recipient": "mom",
+  "recipients": {
+    "mom": {
+      "chat": "mom",
+      "history_limit": null
+    },
+    "work": {
+      "chat": "work",
+      "history_limit": null
+    }
+  }
+}

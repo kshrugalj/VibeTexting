@@ -8,7 +8,7 @@ A powerful CLI tool to help you respond to text messages faster using AI-powered
 - 🎭 **Personal Vibe Mimicry** - Extracts your iMessage style to sound like *you*.
 - 🎨 **Personal Style Matching** - Uses your sent messages as examples.
 - 📋 **Clipboard Integration** - Auto-detect messages from your clipboard.
-- 🧵 **Chat History Context** - Loads recent iMessage history for the person you're texting, with a Contacts.app fallback for saved names.
+- 🧵 **Chat History Context** - Loads the full iMessage conversation for the person you're texting, with a Contacts.app fallback for saved names.
 - 🛠️ **Developer Friendly** - Easy to install and extend.
 
 ## Project Structure
@@ -52,6 +52,40 @@ Start the generator by simply running:
 ```bash
 vibetexting
 ```
+
+### 1a. Set Up Your Defaults
+
+Run the setup command once to create your saved user profile:
+
+```bash
+vibetexting --setup
+```
+
+This writes `~/.vibetexting.json` and stores your name, vibe file, and optional default recipient mapping.
+
+### 1b. Optional User Defaults
+
+If you are publishing this for one person, create a `.vibetexting.json` file in the project folder or `~/.vibetexting.json` in their home directory. The app will load that file first and use it as the default profile.
+
+Example:
+
+```json
+{
+    "name": "Akshay",
+    "vibe": "my_vibe_profile.txt",
+    "model": "llama3",
+    "intent_mode": "suggest",
+    "default_recipient": "mom",
+    "recipients": {
+        "mom": {
+            "chat": "mom",
+            "history_limit": null
+        }
+    }
+}
+```
+
+The `default_recipient` is used when you do not pass `--chat`. Each entry in `recipients` can store its own chat lookup and history limit. Flags like `--name`, `--vibe`, `--chat`, `--model`, `--intent-mode`, and `--history-limit` still override the config when passed.
 
 ### 2. Training on Your Style (Mac Only)
 
@@ -98,16 +132,19 @@ vibetexting --help
 | Argument | Description |
 |----------|-------------|
 | `--model` | Specify the Ollama model to use (default: `llama3`). |
+| `--name` | Optional name to use when the other person asks who you are. |
 | `--vibe`  | Path to a specific vibe profile text file. |
 | `--chat` | Contact first name, last name, phone number, or email to load recent chat history for. |
-| `--history-limit` | Number of recent messages to include from that chat (default: `20`). |
+| `--history-limit` | Maximum number of messages to include from that chat. Leave unset to use the full conversation. |
+| `--intent-mode` | Choose how to handle messages that need your real intent: `uncertain`, `suggest`, or `always`. |
 
 ## How it Works
 
 1. **Input Detection:** The tool automatically pulls the last text from your clipboard.
-2. **Chat Lookup:** You can provide a contact first name, last name, phone number, or email so the tool loads recent iMessage history for that person, and it will try Contacts.app if Messages only stores a number or email.
-3. **Vibe Mimicry:** If a `my_vibe_profile.txt` exists, the AI uses "Few-Shot Prompting" to match your specific vocabulary and sentence structure.
-4. **Output:** The generated reply is printed to the terminal for you to copy.
+2. **Chat Lookup:** You can provide a contact first name, last name, phone number, or email so the tool loads the full iMessage history for that person, and it will try Contacts.app if Messages only stores a number or email.
+3. **Intent Check:** For plan/availability/invitation-type messages, the app pauses and asks what you want to say before drafting the reply. In `suggest` mode, it shows a few likely intents first.
+4. **Vibe Mimicry:** If a `my_vibe_profile.txt` exists, the AI uses "Few-Shot Prompting" to match your specific vocabulary and sentence structure, and it will improvise naturally when there is no exact example.
+5. **Output:** The generated reply is printed to the terminal for you to copy.
 
 ## Contributing
 
