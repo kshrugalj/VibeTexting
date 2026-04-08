@@ -11,8 +11,9 @@ requires-python = ">=3.8"
 dependencies = []
 
 [project.scripts]
-vibetexting = "vibetext:main"
+vibetexting = "vibetexting.cli:main"
 vibe-extract = "extract_imessage_vibe:main"
 
 [tool.setuptools]
-py-modules = ["vibetext", "extract_imessage_vibe"]
+packages = ["vibetexting"]
+py-modules = ["extract_imessage_vibe"]
