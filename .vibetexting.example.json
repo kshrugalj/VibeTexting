@@ -2,6 +2,7 @@
   "name": "Akshay",
   "model": "llama3",
   "vibe": "my_vibe_profile.txt",
+  "loop": false,
   "default_recipient": "mom",
   "recipients": {
     "mom": {

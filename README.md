@@ -137,6 +137,7 @@ vibetexting --help
 | `--chat` | Contact first name, last name, phone number, or email to load recent chat history for. |
 | `--history-limit` | Maximum number of messages to include from that chat. Leave unset to use the full conversation. |
 | `--intent-mode` | Choose how to handle messages that need your real intent: `uncertain`, `suggest`, or `always`. |
+| `--loop`, `-l` | Keep the program running to generate multiple replies in a single session. |
 
 ## How it Works
 
