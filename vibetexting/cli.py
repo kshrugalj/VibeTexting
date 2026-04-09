@@ -12,8 +12,10 @@ from .config import (
 from .database import load_recent_chat_history
 from .prompts import (
     needs_manual_response,
+    is_question_message,
     prompt_for_intent,
     prompt_for_intent_choice,
+    prompt_for_barebones_answer,
     build_prompt,
 )
 from .llm import call_ollama
@@ -137,17 +139,28 @@ def main():
 
         first_run = False
         user_intent = None
+        user_barebones_answer = None
         if args.intent_mode == "always":
             user_intent = prompt_for_intent_choice(original)
         elif args.intent_mode == "suggest":
-            if needs_manual_response(original):
+            if is_question_message(original):
+                user_barebones_answer = prompt_for_barebones_answer(original)
+            elif needs_manual_response(original):
                 user_intent = prompt_for_intent_choice(original)
         else:
             if needs_manual_response(original):
                 user_intent = prompt_for_intent(original)
 
         print(f"\nGenerating a reply using your sent-message style with local Ollama ({args.model})...")
-        prompt = build_prompt(original, vibe_content, chat_history, resolved_chat_label or chat_filter, args.name, user_intent)
+        prompt = build_prompt(
+            original,
+            vibe_content,
+            chat_history,
+            resolved_chat_label or chat_filter,
+            args.name,
+            user_intent,
+            user_barebones_answer,
+        )
         reply = call_ollama(prompt, args.model)
         print("\n" + "="*40)
         print(f"SUGGESTED REPLY:")

@@ -63,6 +63,37 @@ def needs_manual_response(message: str) -> bool:
             return True
     return False
 
+def is_question_message(message: str) -> bool:
+    lowered_message = (message or "").strip().lower()
+    if not lowered_message:
+        return False
+    if lowered_message.endswith("?"):
+        return True
+    question_starts = (
+        "what ",
+        "when ",
+        "where ",
+        "why ",
+        "who ",
+        "how ",
+        "are you ",
+        "is it ",
+        "is this ",
+        "do you ",
+        "did you ",
+        "can you ",
+        "could you ",
+        "would you ",
+        "should you ",
+        "will you ",
+        "am i ",
+        "can i ",
+        "could i ",
+        "would i ",
+        "should i ",
+    )
+    return lowered_message.startswith(question_starts)
+
 def prompt_for_intent(original: str) -> str:
     print("\nThis message looks like it needs your real intent before a reply is drafted.")
     print(f"Message: {original}")
@@ -89,6 +120,12 @@ def prompt_for_intent_choice(original: str) -> str:
         except ValueError:
             continue
 
+def prompt_for_barebones_answer(original: str) -> str:
+    print("\nThis looks like a question. Give the bare bones answer you want to say back.")
+    print(f"Message: {original}")
+    answer = input("Bare bones answer: ").strip()
+    return answer
+
 def build_prompt(
     original: str,
     vibe_profile: Optional[str] = None,
@@ -96,6 +133,7 @@ def build_prompt(
     chat_label: Optional[str] = None,
     user_name: Optional[str] = None,
     user_intent: Optional[str] = None,
+    user_barebones_answer: Optional[str] = None,
 ) -> str:
     system_setup = "You are an AI assistant helping someone respond to a text message."
     if vibe_profile:
@@ -115,6 +153,8 @@ def build_prompt(
     intent_block = ""
     if user_intent:
         intent_block = f"\n\nThe user wants to say this in response: {user_intent}"
+    if user_barebones_answer:
+        intent_block = f"\n\nThe user gave this bare-bones answer to the question: {user_barebones_answer}"
     return f"""{system_setup}{identity_block}{history_block}{intent_block}
 
 Incoming message: "{original}"
@@ -126,5 +166,6 @@ Answer the message the way a real person would in normal conversation, whether i
 Do not respond with dismissive filler like "idk", "lol", or vague deflections unless that is clearly the style in the examples.
 If no name is configured, do not invent one or refer to yourself as an assistant; just answer naturally in the same voice.
 If the user provided an intent sentence, treat that as the meaning to preserve and rewrite it in the user's texting style.
+If the user provided a bare-bones answer, treat that as the content to preserve and rewrite it in the user's texting style.
 Keep it concise and appropriate for a text message.
 Response:"""
