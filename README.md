@@ -9,6 +9,7 @@ A powerful CLI tool to help you respond to text messages faster using AI-powered
 - 🎨 **Personal Style Matching** - Uses your sent messages as examples.
 - 📋 **Clipboard Integration** - Auto-detect messages from your clipboard.
 - 🧵 **Chat History Context** - Loads the full iMessage conversation for the person you're texting, with a Contacts.app fallback for saved names.
+- 👥 **Group Chat Aware** - Detects group threads, keeps participant-aware history labels, and can list recent groups for quick switching.
 - 🛠️ **Developer Friendly** - Easy to install and extend.
 
 ## Project Structure
@@ -132,17 +133,39 @@ vibetexting --help
 | Argument | Description |
 |----------|-------------|
 | `--model` | Specify the Ollama model to use (default: `llama3`). |
+| `--backend` | Inference backend: `auto`, `ollama`, or `lmstudio` (default: `auto`). |
 | `--name` | Optional name to use when the other person asks who you are. |
 | `--vibe`  | Path to a specific vibe profile text file. |
 | `--chat` | Contact first name, last name, phone number, or email to load recent chat history for. |
 | `--history-limit` | Maximum number of messages to include from that chat. Leave unset to use the full conversation. |
+| `--list-groups` | Print recent group chats with participant counts, then exit. |
 | `--intent-mode` | Choose how to handle messages that need your real intent: `uncertain`, `suggest`, or `always`. |
 | `--loop`, `-l` | Keep the program running to generate multiple replies in a single session. |
+
+To use a model served by LM Studio, start LM Studio Local Server and run:
+
+```bash
+vibetexting --backend lmstudio --model gemma-3-4b-it
+```
+
+If large models are slow to produce the first token, increase request timeout:
+
+```bash
+export VIBETEXT_LMSTUDIO_TIMEOUT_SECONDS=600
+export VIBETEXT_LLM_TIMEOUT_SECONDS=120
+```
+
+In loop mode, you can also use:
+
+| Command | Description |
+|----------|-------------|
+| `/chat <name-or-number>` | Switch to a different chat target. |
+| `/groups` | Show recent group chats and choose one to switch into. |
 
 ## How it Works
 
 1. **Input Detection:** The tool automatically pulls the last text from your clipboard.
-2. **Chat Lookup:** You can provide a contact first name, last name, phone number, or email so the tool loads the full iMessage history for that person, and it will try Contacts.app if Messages only stores a number or email.
+2. **Chat Lookup:** You can provide a contact first name, last name, phone number, email, or group thread name so the tool loads full iMessage history. It also tries Contacts.app when Messages only stores a number/email.
 3. **Intent Check:** For plan/availability/invitation-type messages, the app pauses and asks what you want to say before drafting the reply. In `suggest` mode, it shows a few likely intents first.
 4. **Vibe Mimicry:** If a `my_vibe_profile.txt` exists, the AI uses "Few-Shot Prompting" to match your specific vocabulary and sentence structure, and it will improvise naturally when there is no exact example.
 5. **Output:** The generated reply is printed to the terminal for you to copy.

@@ -1,7 +1,7 @@
 import os
 import sqlite3
 from datetime import datetime, timedelta
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict
 from .utils import fuzzy_name_match, normalize_chat_key
 from .contacts import resolve_contacts_aliases
 
@@ -86,16 +86,7 @@ def resolve_chat_matches(chat_filter: str) -> List[Tuple[float, int, str]]:
         handles = data["handles"]
         last_msg_date = data["last_msg_date"]
         
-        # Build a descriptive label
-        label = display_name
-        if not label:
-            if chat_identifier and not chat_identifier.startswith("chat") and not chat_identifier.startswith("SMS") and not chat_identifier.startswith("iMessage"):
-                label = chat_identifier
-            elif handles:
-                # Prefer phone number as label
-                label = next((h for h in handles if "@" not in h), next(iter(handles)))
-            else:
-                label = f"Chat {chat_id}"
+        label = _build_chat_label(chat_id, display_name, chat_identifier, handles)
 
         best_score = 0.0
         for term in candidate_terms:
@@ -158,14 +149,93 @@ def prompt_for_chat_suggestion(matches: list) -> Optional[tuple]:
         except ValueError:
             continue
 
-def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None) -> tuple[str, int, Optional[str]]:
+def _build_chat_label(chat_id: int, display_name: Optional[str], chat_identifier: Optional[str], handles: set) -> str:
+    if display_name:
+        return display_name
+    if chat_identifier and not chat_identifier.startswith("chat") and not chat_identifier.startswith("SMS") and not chat_identifier.startswith("iMessage"):
+        return chat_identifier
+    if handles:
+        ordered_handles = sorted(handles)
+        if len(ordered_handles) == 1:
+            return ordered_handles[0]
+        if len(ordered_handles) == 2:
+            return f"{ordered_handles[0]} + {ordered_handles[1]}"
+        return f"{ordered_handles[0]} +{len(ordered_handles) - 1} others"
+    return f"Chat {chat_id}"
+
+def _get_chat_participants(conn: sqlite3.Connection, chat_id: int) -> List[str]:
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT DISTINCT COALESCE(h.id, h.uncanonicalized_id)
+        FROM chat_handle_join chj
+        LEFT JOIN handle h ON h.ROWID = chj.handle_id
+        WHERE chj.chat_id = ?
+          AND COALESCE(h.id, h.uncanonicalized_id) IS NOT NULL
+        """,
+        [chat_id],
+    )
+    participants = []
+    for (identifier,) in cursor.fetchall():
+        if identifier:
+            participants.append(identifier)
+    return sorted(set(participants))
+
+def list_recent_group_chats(limit: int = 10) -> List[Dict[str, object]]:
     db_path = get_chat_db_path()
     if not os.path.exists(db_path):
-        return "", 0, None
+        return []
+
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                c.ROWID,
+                c.display_name,
+                c.chat_identifier,
+                COUNT(DISTINCT chj.handle_id) AS participant_count,
+                MAX(m.date) AS last_msg_date
+            FROM chat c
+            LEFT JOIN chat_handle_join chj ON chj.chat_id = c.ROWID
+            LEFT JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID
+            LEFT JOIN message m ON m.ROWID = cmj.message_id
+            GROUP BY c.ROWID
+            HAVING participant_count > 1
+            ORDER BY last_msg_date DESC
+            LIMIT ?
+            """,
+            [limit],
+        )
+        rows = cursor.fetchall()
+        chats: List[Dict[str, object]] = []
+        for chat_id, display_name, chat_identifier, participant_count, _ in rows:
+            participants = _get_chat_participants(conn, chat_id)
+            label = _build_chat_label(chat_id, display_name, chat_identifier, set(participants))
+            chats.append(
+                {
+                    "chat_id": chat_id,
+                    "label": label,
+                    "participant_count": int(participant_count or 0),
+                }
+            )
+        return chats
+    except (sqlite3.OperationalError, sqlite3.DatabaseError):
+        return []
+    finally:
+        if conn is not None:
+            conn.close()
+
+def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None) -> tuple[str, int, Optional[str], bool, Optional[str]]:
+    db_path = get_chat_db_path()
+    if not os.path.exists(db_path):
+        return "", 0, None, False, None
 
     matching_chats = resolve_chat_matches(chat_filter)
     if not matching_chats:
-        return "", 0, None
+        return "", 0, None, False, None
 
     # If the top match is very strong (>= 95) and the second is significantly lower, use it directly.
     # Otherwise, if there are multiple strong options, ask the user.
@@ -181,7 +251,7 @@ def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None) -> t
         selected_chat = prompt_for_chat_suggestion(matching_chats)
 
     if not selected_chat:
-        return "", 0, None
+        return "", 0, None, False, None
 
     best_score, chat_id, resolved_label = selected_chat
     print(f"✅ Matched with '{resolved_label}'")
@@ -190,12 +260,15 @@ def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None) -> t
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
+        participants = _get_chat_participants(conn, chat_id)
+        is_group_chat = len(participants) > 1
+
         query = f"""
             SELECT
                 m.date,
                 m.is_from_me,
                 m.text,
-                h.id,
+                COALESCE(h.id, h.uncanonicalized_id),
                 c.display_name
             FROM message m
             LEFT JOIN handle h ON h.ROWID = m.handle_id
@@ -217,18 +290,29 @@ def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None) -> t
         rows = cursor.fetchall()
 
         if not rows:
-            return "", 0, resolved_label
+            return "", 0, resolved_label, is_group_chat, None
 
         lines = []
         for dt_raw, is_from_me, text, handle_id, display_name in reversed(rows):
-            speaker = "Me" if is_from_me == 1 else (display_name or handle_id or "Them")
+            speaker = "Me" if is_from_me == 1 else (handle_id or display_name or "Them")
             dt_txt = apple_timestamp_to_iso(dt_raw)
             cleaned = (text or "").replace("\ufffc", "").replace("\n", " ").strip()
             if cleaned:
                 lines.append(f"[{dt_txt}] {speaker}: {cleaned}")
-        return "\n".join(lines), len(lines), resolved_label
+
+        chat_context = None
+        if is_group_chat:
+            preview_participants = participants[:6]
+            if len(participants) > 6:
+                preview_participants.append(f"+{len(participants) - 6} more")
+            participant_line = ", ".join(preview_participants) if preview_participants else "unknown"
+            chat_context = (
+                f"Group chat context: this thread has {len(participants)} participant handles. "
+                f"Known participants: {participant_line}."
+            )
+        return "\n".join(lines), len(lines), resolved_label, is_group_chat, chat_context
     except (sqlite3.OperationalError, sqlite3.DatabaseError):
-        return "", 0, resolved_label
+        return "", 0, resolved_label, False, None
     finally:
         if conn is not None:
             conn.close()
