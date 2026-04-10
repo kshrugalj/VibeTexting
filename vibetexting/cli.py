@@ -9,7 +9,7 @@ from .config import (
     DEFAULT_INTENT_MODE,
     INTENT_MODES,
 )
-from .database import load_recent_chat_history
+from .database import load_recent_chat_history, list_recent_group_chats
 from .prompts import (
     needs_manual_response,
     is_question_message,
@@ -71,6 +71,7 @@ def main():
     parser.add_argument("--vibe", help="Path to your vibe profile (default: my_vibe_profile.txt if it exists)")
     parser.add_argument("--chat", help="Contact name, phone number, or email to load recent chat history")
     parser.add_argument("--history-limit", type=int, default=None, help="Max messages to include from that chat (default: full conversation)")
+    parser.add_argument("--list-groups", action="store_true", help="List recent group chats and exit")
     parser.add_argument("--loop", "-l", action="store_true", help="Keep the program running for multiple messages")
     args = parser.parse_args()
 
@@ -85,6 +86,16 @@ def main():
     print("\n--- VibeText CLI (Local Mode) ---")
     if config.get("__path__"):
         print(f"✅ Loaded user defaults from {config['__path__']}")
+
+    if args.list_groups:
+        groups = list_recent_group_chats(limit=20)
+        if not groups:
+            print("No recent group chats were found.")
+            return 0
+        print("\nRecent group chats:")
+        for idx, group in enumerate(groups, start=1):
+            print(f"  {idx}. {group['label']} ({group['participant_count']} participants)")
+        return 0
     
     vibe_path = args.vibe or "my_vibe_profile.txt"
     vibe_content = None
@@ -109,7 +120,7 @@ def main():
                 original = input("Enter message: ")
         else:
             print("\n" + "-"*40)
-            original = input("Enter message (or 'exit' to quit, '/chat' to switch): ").strip()
+            original = input("Enter message (or 'exit' to quit, '/chat' or '/groups'): ").strip()
 
         if original.lower() in ['exit', 'quit']:
             if not first_run:
@@ -127,21 +138,48 @@ def main():
                 chat_filter = new_chat
             print(f"✅ Switched recipient to '{chat_filter or 'None'}'")
             continue
+        if original.startswith('/groups'):
+            groups = list_recent_group_chats(limit=10)
+            if not groups:
+                print("No recent group chats were found.")
+                continue
+            print("\nRecent group chats:")
+            for idx, group in enumerate(groups, start=1):
+                print(f"  {idx}. {group['label']} ({group['participant_count']} participants)")
+            selection = input("Pick a group number to switch, or press Enter to keep current chat: ").strip()
+            if selection:
+                try:
+                    selected_idx = int(selection)
+                    if 1 <= selected_idx <= len(groups):
+                        chat_filter = groups[selected_idx - 1]["label"]
+                        print(f"✅ Switched recipient to '{chat_filter}'")
+                    else:
+                        print("Invalid selection. Keeping current chat.")
+                except ValueError:
+                    print("Invalid selection. Keeping current chat.")
+            continue
 
         if not chat_filter:
             chat_filter = input("\nWho are you texting? (name, number, or Enter to skip history): ").strip() or None
 
         chat_history = None
         resolved_chat_label = None
+        chat_context = None
         if chat_filter:
             print(f"Searching recent chat history for '{chat_filter}'...")
-            chat_history, message_count, resolved_chat_label = load_recent_chat_history(chat_filter, args.history_limit)
+            chat_history, message_count, resolved_chat_label, is_group_chat, chat_context = load_recent_chat_history(chat_filter, args.history_limit)
             if chat_history:
                 label = resolved_chat_label or chat_filter
                 if args.history_limit is None:
-                    print(f"✅ Loaded the full conversation with '{label}' ({message_count} messages)")
+                    if is_group_chat:
+                        print(f"✅ Loaded the full group conversation in '{label}' ({message_count} messages)")
+                    else:
+                        print(f"✅ Loaded the full conversation with '{label}' ({message_count} messages)")
                 else:
-                    print(f"✅ Loaded {message_count} messages from '{label}'")
+                    if is_group_chat:
+                        print(f"✅ Loaded {message_count} messages from group chat '{label}'")
+                    else:
+                        print(f"✅ Loaded {message_count} messages from '{label}'")
             else:
                 print("No matching chat history found. Continuing without chat context.")
 
@@ -167,6 +205,7 @@ def main():
             vibe_content,
             chat_history,
             resolved_chat_label or chat_filter,
+            chat_context,
             args.name,
             user_intent,
             user_barebones_answer,
