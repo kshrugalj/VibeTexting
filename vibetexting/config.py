@@ -52,7 +52,9 @@ def merge_runtime_settings(args: argparse.Namespace, config: dict) -> argparse.N
                     break
     if not args.name and config.get("name"):
         args.name = config.get("name")
-    if getattr(args, "model", None) == "llama3" and config.get("model"):
+    if not getattr(args, "backend", None) and config.get("backend"):
+        args.backend = config.get("backend")
+    if not getattr(args, "model", None) and config.get("model"):
         args.model = config.get("model")
     if not getattr(args, "vibe", None) and config.get("vibe"):
         args.vibe = config.get("vibe")

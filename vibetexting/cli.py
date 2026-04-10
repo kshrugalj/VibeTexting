@@ -18,7 +18,7 @@ from .prompts import (
     prompt_for_barebones_answer,
     build_prompt,
 )
-from .llm import call_ollama
+from .llm import call_local_llm
 from .utils import get_clipboard_text # I'll add this to utils.py next
 
 def prompt_setup_config() -> dict:
@@ -26,7 +26,13 @@ def prompt_setup_config() -> dict:
     print("This will save your default user profile for future runs. Press Enter to keep a value blank.")
     name = input("Your name [optional]: ").strip()
     vibe = input("Vibe profile path [default: my_vibe_profile.txt]: ").strip() or "my_vibe_profile.txt"
-    model = input("Ollama model [default: llama3]: ").strip() or "llama3"
+    backend = input("LLM backend [auto/ollama/lmstudio, default: auto]: ").strip().lower() or "auto"
+    if backend not in {"auto", "ollama", "lmstudio"}:
+        print("Invalid backend. Using default: auto")
+        backend = "auto"
+    default_model = "llama3" if backend in {"auto", "ollama"} else ""
+    model_prompt = f"Model name [default: {default_model}]: " if default_model else "Model name (as shown in LM Studio): "
+    model = input(model_prompt).strip() or default_model
     intent_mode = input("Intent mode [uncertain/suggest/always, default: uncertain]: ").strip().lower() or DEFAULT_INTENT_MODE
     if intent_mode not in INTENT_MODES:
         print(f"Invalid intent mode. Using default: {DEFAULT_INTENT_MODE}")
@@ -45,7 +51,8 @@ def prompt_setup_config() -> dict:
         recipients[default_recipient] = recipient_config
     config = {
         "name": name or None,
-        "model": model,
+        "backend": backend,
+        "model": model or None,
         "intent_mode": intent_mode,
         "vibe": vibe,
         "default_recipient": default_recipient or None,
@@ -57,7 +64,8 @@ def main():
     parser = argparse.ArgumentParser(description="VibeText CLI - 100% Local AI Text Responder")
     parser.add_argument("--local", action="store_true", help="Compatibility flag for local mode (no-op)")
     parser.add_argument("--setup", action="store_true", help="Run interactive setup to create your default config")
-    parser.add_argument("--model", default="llama3", help="Ollama model to use (default: llama3)")
+    parser.add_argument("--model", default=None, help="Model name to use (default: llama3 for ollama, or as shown in LM Studio)")
+    parser.add_argument("--backend", choices=["auto", "ollama", "lmstudio"], default=None, help="LLM backend to use (default: auto)")
     parser.add_argument("--name", help="Optional name to use for direct identity questions")
     parser.add_argument("--intent-mode", choices=sorted(INTENT_MODES), help="How to handle messages that need your real intent")
     parser.add_argument("--vibe", help="Path to your vibe profile (default: my_vibe_profile.txt if it exists)")
@@ -151,7 +159,9 @@ def main():
             if needs_manual_response(original):
                 user_intent = prompt_for_intent(original)
 
-        print(f"\nGenerating a reply using your sent-message style with local Ollama ({args.model})...")
+        backend = getattr(args, "backend", None) or "auto"
+        model = getattr(args, "model", None) or "llama3"
+        print(f"\nGenerating a reply using backend '{backend}' ({model})...")
         prompt = build_prompt(
             original,
             vibe_content,
@@ -161,7 +171,7 @@ def main():
             user_intent,
             user_barebones_answer,
         )
-        reply = call_ollama(prompt, args.model)
+        reply = call_local_llm(prompt, model, backend)
         print("\n" + "="*40)
         print(f"SUGGESTED REPLY:")
         print("-" * 40)
