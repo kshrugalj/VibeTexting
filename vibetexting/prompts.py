@@ -131,6 +131,7 @@ def build_prompt(
     vibe_profile: Optional[str] = None,
     chat_history: Optional[str] = None,
     chat_label: Optional[str] = None,
+    chat_context: Optional[str] = None,
     user_name: Optional[str] = None,
     user_intent: Optional[str] = None,
     user_barebones_answer: Optional[str] = None,
@@ -150,6 +151,8 @@ def build_prompt(
     if chat_history:
         label = f" for {chat_label}" if chat_label else ""
         history_block = f"\n\nHere is the conversation history{label}:\n{chat_history}"
+    if chat_context:
+        history_block += f"\n\n{chat_context}"
     intent_block = ""
     if user_intent:
         intent_block = f"\n\nThe user wants to say this in response: {user_intent}"
@@ -167,5 +170,6 @@ Do not respond with dismissive filler like "idk", "lol", or vague deflections un
 If no name is configured, do not invent one or refer to yourself as an assistant; just answer naturally in the same voice.
 If the user provided an intent sentence, treat that as the meaning to preserve and rewrite it in the user's texting style.
 If the user provided a bare-bones answer, treat that as the content to preserve and rewrite it in the user's texting style.
+If this is a group chat, reply in a way that fits the latest speaker and group context naturally.
 Keep it concise and appropriate for a text message.
 Response:"""
