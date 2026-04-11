@@ -166,7 +166,7 @@ In loop mode, you can also use:
 
 1. **Input Detection:** The tool automatically pulls the last text from your clipboard.
 2. **Chat Lookup:** You can provide a contact first name, last name, phone number, email, or group thread name so the tool loads full iMessage history. It also tries Contacts.app when Messages only stores a number/email.
-3. **Intent Check:** For plan/availability/invitation-type messages, the app pauses and asks what you want to say before drafting the reply. In `suggest` mode, it shows a few likely intents first.
+3. **Intent Check:** For plan/availability/invitation-type messages, the app pauses and asks what you want to say before drafting the reply. In `suggest` mode, it shows a few likely intents first. For simple question-type messages, it prompts you for a "bare-bones answer" (the raw facts) so it can rewrite them in your personal style.
 4. **Vibe Mimicry:** If a `my_vibe_profile.txt` exists, the AI uses "Few-Shot Prompting" to match your specific vocabulary and sentence structure, and it will improvise naturally when there is no exact example.
 5. **Output:** The generated reply is printed to the terminal for you to copy.
 
