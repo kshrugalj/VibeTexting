@@ -6,6 +6,7 @@ from .utils import normalize_chat_key
 
 DEFAULT_CONFIG_PATH = os.path.expanduser("~/.vibetexting.json")
 DEFAULT_INTENT_MODE = "uncertain"
+DEFAULT_HISTORY_LIMIT = 20
 INTENT_MODES = {"always", "uncertain", "suggest"}
 
 def load_user_config() -> dict:
@@ -64,17 +65,22 @@ def merge_runtime_settings(args: argparse.Namespace, config: dict) -> argparse.N
             args.chat = config_chat
         elif isinstance(recipient_key, str) and recipient_key:
             args.chat = recipient_key
-    if getattr(args, "history_limit", None) is None:
+    if getattr(args, "full", False):
+        args.history_limit = None
+    elif getattr(args, "history_limit", None) is None:
         recipient_history_limit = None
         if isinstance(recipient_config, dict):
             recipient_history_limit = recipient_config.get("history_limit")
         if recipient_history_limit is None and config.get("history_limit") is not None:
             recipient_history_limit = config.get("history_limit")
+        
         if recipient_history_limit is not None:
             try:
                 args.history_limit = int(recipient_history_limit)
             except Exception:
-                pass
+                args.history_limit = DEFAULT_HISTORY_LIMIT
+        else:
+            args.history_limit = DEFAULT_HISTORY_LIMIT
     if not getattr(args, "intent_mode", None) and config.get("intent_mode"):
         args.intent_mode = config.get("intent_mode")
     if not getattr(args, "intent_mode", None):

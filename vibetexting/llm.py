@@ -34,6 +34,16 @@ def call_ollama(prompt: str, model: str = "llama3") -> str:
     except Exception as e:
         return f"Error connecting to Ollama: {str(e)}\nEnsure Ollama is running (https://ollama.com)."
 
+def list_ollama_models() -> list[str]:
+    """Lists available models from the local Ollama instance."""
+    try:
+        url = OLLAMA_API_URL.replace("/generate", "/tags")
+        with request.urlopen(url, timeout=2) as response:
+            data = json.loads(response.read().decode("utf-8"))
+            return [m["name"] for m in data.get("models", [])]
+    except Exception:
+        return []
+
 def call_lmstudio(prompt: str, model: str) -> str:
     """Calls LM Studio's OpenAI-compatible local server."""
     api_url = f"{LM_STUDIO_BASE_URL.rstrip('/')}/v1/chat/completions"
@@ -77,6 +87,16 @@ def call_lmstudio(prompt: str, model: str) -> str:
             f"Error connecting to LM Studio: {str(e)}\n"
             "Start LM Studio, load a model, and enable the Local Server (default http://localhost:1234)."
         )
+
+def list_lmstudio_models() -> list[str]:
+    """Lists available models from the LM Studio Local Server."""
+    try:
+        url = f"{LM_STUDIO_BASE_URL.rstrip('/')}/v1/models"
+        with request.urlopen(url, timeout=2) as response:
+            data = json.loads(response.read().decode("utf-8"))
+            return [m["id"] for m in data.get("data", [])]
+    except Exception:
+        return []
 
 def call_local_llm(prompt: str, model: str = "llama3", backend: str = "auto") -> str:
     backend = (backend or "auto").lower()

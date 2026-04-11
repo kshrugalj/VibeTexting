@@ -1,6 +1,6 @@
 {
   "name": "Akshay",
-  "model": "llama3",
+  "model": "gemma-4",
   "vibe": "my_vibe_profile.txt",
   "loop": false,
   "default_recipient": "mom",
