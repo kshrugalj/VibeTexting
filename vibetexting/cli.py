@@ -2,6 +2,7 @@ import os
 import sys
 import argparse
 import subprocess
+import time
 from .config import (
     load_user_config,
     save_user_config,
@@ -9,7 +10,7 @@ from .config import (
     DEFAULT_INTENT_MODE,
     INTENT_MODES,
 )
-from .database import load_recent_chat_history, list_recent_group_chats
+from .database import load_recent_chat_history, list_recent_group_chats, search_relevant_history
 from .prompts import (
     needs_manual_response,
     is_question_message,
@@ -19,7 +20,7 @@ from .prompts import (
     build_prompt,
 )
 from .llm import call_local_llm, list_ollama_models, list_lmstudio_models
-from .utils import get_clipboard_text
+from .utils import get_clipboard_text, send_imessage
 
 # ANSI color codes for prettier CLI
 CLR_VIBE = "\033[1;35m"  # Bold Magenta
@@ -38,6 +39,8 @@ def print_help():
     print(f"  {CLR_PRE}/models{CLR_RESET}       - List all available local models")
     print(f"  {CLR_PRE}/limit [num]{CLR_RESET}   - Change message history limit")
     print(f"  {CLR_PRE}/full{CLR_RESET}          - Use the WHOLE conversation as context")
+    print(f"  {CLR_PRE}/goal [text]{CLR_RESET}   - Set a conversation goal (steers AI automatically)")
+    print(f"  {CLR_PRE}/auto{CLR_RESET}           - Enter Auto-Pilot mode (monitors and replies automatically)")
     print(f"  {CLR_PRE}/vibe [path]{CLR_RESET}   - Switch vibe profile file")
     print(f"  {CLR_PRE}/paste{CLR_RESET}        - Use text from clipboard as message")
     print(f"  {CLR_PRE}/help{CLR_RESET}         - Show this menu")
@@ -83,6 +86,88 @@ def prompt_setup_config() -> dict:
     }
     return {key: value for key, value in config.items() if value is not None}
 
+def run_autopilot(args, config, chat_filter, vibe_content, goal):
+    """Monitors chat history and automatically replies to new messages."""
+    print(f"\n{CLR_VIBE}--- 🤖 Auto-Pilot Mode Active ---{CLR_RESET}")
+    if not goal:
+        print(f"{CLR_ERR}No goal set!{CLR_RESET}")
+        goal = input(f"{CLR_USR}What is the goal for this autonomous conversation?{CLR_RESET} ").strip()
+        if not goal:
+            print(f"{CLR_ERR}Goal required for Auto-Pilot. Returning to interactive mode.{CLR_RESET}")
+            return goal
+
+    print(f"{CLR_DIM}Monitoring conversations with '{chat_filter}'...{CLR_RESET}")
+    print(f"{CLR_DIM}Active Goal: {CLR_RESET}{goal}")
+    print(f"{CLR_DIM}Press Ctrl+C to stop.{CLR_RESET}\n")
+
+    last_history, last_count, resolved_label, is_group_chat, chat_context, chat_id = load_recent_chat_history(chat_filter, 1)
+    
+    try:
+        while True:
+            time.sleep(5) # Poll every 5 seconds
+            current_history, current_count, _, _, _, _ = load_recent_chat_history(chat_filter, 1)
+            
+            # If the last message in history has changed and it's not from us
+            if current_history != last_history:
+                # Get the actual last message content to see who sent it
+                # We reload with a small limit to inspect the latest
+                history_full, count, label, is_group, context, cid = load_recent_chat_history(chat_filter, args.history_limit or 20)
+                
+                # Check if the very last line starts with "Me:"
+                lines = history_full.strip().split("\n")
+                if not lines:
+                    continue
+                
+                last_line = lines[-1]
+                if "]: Me: " in last_line:
+                    # We sent this message, or at least the last message is ours. Skip.
+                    last_history = current_history
+                    continue
+                
+                # New incoming message detected!
+                print(f"\n{CLR_USR}New message detected:{CLR_RESET}")
+                print(f"{CLR_DIM}{last_line}{CLR_RESET}")
+                
+                # Extract the message text from the last line (after the speaker label)
+                # Format: [timestamp] Speaker: Text
+                try:
+                    original_msg = last_line.split(": ", 1)[1]
+                except IndexError:
+                    original_msg = last_line
+                
+                memories = search_relevant_history(chat_id, original_msg)
+                
+                print(f"{CLR_DIM}Generating autonomous reply...{CLR_RESET}")
+                prompt = build_prompt(
+                    original_msg,
+                    vibe_content,
+                    history_full,
+                    label,
+                    context,
+                    args.name,
+                    None, # No user intent in auto mode
+                    None, # No barebones answer
+                    memories,
+                    goal
+                )
+                
+                reply = call_local_llm(prompt, args.model or "llama3", args.backend or "auto")
+                
+                if "Error" not in reply:
+                    print(f"{CLR_PRE}🤖 Sending reply:{CLR_RESET} {reply}")
+                    success = send_imessage(label, reply)
+                    if success:
+                        print(f"{CLR_DIM}✅ Sent successfully.{CLR_RESET}")
+                    else:
+                        print(f"{CLR_ERR}❌ Failed to send via AppleScript.{CLR_RESET}")
+                else:
+                    print(f"{CLR_ERR}LLM Error: {reply}{CLR_RESET}")
+                
+                last_history = current_history
+    except KeyboardInterrupt:
+        print(f"\n{CLR_VIBE}--- Auto-Pilot Deactivated ---{CLR_RESET}")
+        return goal
+
 def main():
     parser = argparse.ArgumentParser(description="VibeText CLI - 100% Local AI Text Responder")
     parser.add_argument("--local", action="store_true", help="Compatibility flag for local mode (no-op)")
@@ -96,7 +181,6 @@ def main():
     parser.add_argument("--history-limit", type=int, default=None, help="Max history messages")
     parser.add_argument("--full", action="store_true", help="Use the entire chat history as context (warning: may exceed model limit)")
     parser.add_argument("--list-groups", action="store_true", help="List recent group chats and exit")
-    parser.add_argument("--loop", "-l", action="store_true", help="Keep the program running for multiple messages")
     args = parser.parse_args()
 
     if args.setup:
@@ -121,10 +205,11 @@ def main():
     print(f"\n{CLR_VIBE}--- VibeText CLI (Local Mode) ---{CLR_RESET}")
     if config.get("__path__"):
         print(f"{CLR_DIM}Loaded defaults from {config['__path__']}{CLR_RESET}")
-    print(f"{CLR_DIM}Type {CLR_RESET}/help{CLR_DIM} to see available commands.{RESET if 'RESET' in locals() else CLR_RESET}")
+    print(f"{CLR_DIM}Type {CLR_RESET}/help{CLR_DIM} to see available commands.{CLR_RESET}")
 
     chat_filter = args.chat
     first_run = True
+    goal = None
     
     while True:
         vibe_path = args.vibe or "my_vibe_profile.txt"
@@ -159,7 +244,6 @@ def main():
             original = input(f"{CLR_PRE}vibetext{prompt_label}{CLR_RESET}> ").strip()
 
         if not original:
-            if not args.loop and not first_run: break
             first_run = False
             continue
 
@@ -171,6 +255,31 @@ def main():
         
         if cmd == '/help':
             print_help()
+            first_run = False
+            continue
+
+        if cmd.startswith('/goal'):
+            parts = original.split(maxsplit=1)
+            new_goal = parts[1] if len(parts) > 1 else ""
+            if not new_goal:
+                new_goal = input("\nEnter conversation goal (or 'clear' to remove): ").strip()
+            
+            if new_goal.lower() == 'clear':
+                goal = None
+                print(f"{CLR_PRE}✅ Goal cleared.{CLR_RESET}")
+            elif new_goal:
+                goal = new_goal
+                print(f"{CLR_PRE}✅ Goal set to: {goal}{CLR_RESET}")
+            first_run = False
+            continue
+
+        if cmd == '/auto':
+            if not chat_filter:
+                chat_filter = input(f"\n{CLR_USR}Who are you texting?{CLR_RESET} ").strip() or None
+            if chat_filter:
+                goal = run_autopilot(args, config, chat_filter, vibe_content, goal)
+            else:
+                print(f"{CLR_ERR}A recipient must be set for Auto-Pilot.{CLR_RESET}")
             first_run = False
             continue
 
@@ -298,9 +407,10 @@ def main():
         chat_history = None
         resolved_chat_label = None
         chat_context = None
+        chat_id = None
         if chat_filter:
             print(f"{CLR_DIM}Searching iMessage history for '{chat_filter}'...{CLR_RESET}")
-            chat_history, message_count, resolved_chat_label, is_group_chat, chat_context = load_recent_chat_history(chat_filter, args.history_limit)
+            chat_history, message_count, resolved_chat_label, is_group_chat, chat_context, chat_id = load_recent_chat_history(chat_filter, args.history_limit)
             if chat_history:
                 label = resolved_chat_label or chat_filter
                 print(f"{CLR_PRE}✅ Loaded {message_count} messages from '{label}'{CLR_RESET}")
@@ -308,18 +418,31 @@ def main():
                 print(f"{CLR_DIM}No history found. Continuing without context.{CLR_RESET}")
 
         first_run = False
+
+        # Search for relevant old memories based on keywords in the current message
+        memories = None
+        if chat_id and original and not original.startswith('/'):
+            memories = search_relevant_history(chat_id, original)
+            if memories:
+                print(f"{CLR_PRE}✅ Retrieved related memories from past conversations.{CLR_RESET}")
+
         user_intent = None
         user_barebones_answer = None
-        if args.intent_mode == "always":
-            user_intent = prompt_for_intent_choice(original)
-        elif args.intent_mode == "suggest":
-            if is_question_message(original):
-                user_barebones_answer = prompt_for_barebones_answer(original)
-            elif needs_manual_response(original):
-                user_intent = prompt_for_intent_choice(original)
+        
+        # If a goal is set, skip manual intent prompting
+        if goal:
+            print(f"{CLR_DIM}Steering towards goal: {goal}{CLR_RESET}")
         else:
-            if needs_manual_response(original):
-                user_intent = prompt_for_intent(original)
+            if args.intent_mode == "always":
+                user_intent = prompt_for_intent_choice(original)
+            elif args.intent_mode == "suggest":
+                if is_question_message(original):
+                    user_barebones_answer = prompt_for_barebones_answer(original)
+                elif needs_manual_response(original):
+                    user_intent = prompt_for_intent_choice(original)
+            else:
+                if needs_manual_response(original):
+                    user_intent = prompt_for_intent(original)
 
         backend = getattr(args, "backend", None) or "auto"
         model = getattr(args, "model", None) or "llama3"
@@ -334,6 +457,8 @@ def main():
             args.name,
             user_intent,
             user_barebones_answer,
+            memories,
+            goal
         )
         reply = call_local_llm(prompt, model, backend)
         
@@ -350,8 +475,6 @@ def main():
             except Exception:
                 pass
         
-        if not args.loop:
-            break
         print()
 
 if __name__ == "__main__":

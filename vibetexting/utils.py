@@ -55,3 +55,33 @@ def fuzzy_name_match(search_term: str, field_value: str) -> float:
 
 def escape_applescript_string(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
+
+def send_imessage(recipient_identifier: str, message_text: str) -> bool:
+    """Sends an iMessage using AppleScript (macOS only)."""
+    escaped_msg = escape_applescript_string(message_text)
+    # This AppleScript attempts to find a buddy by identifier (email/phone)
+    # It's more robust than relying on a window being open.
+    script = f'''
+    tell application "Messages"
+        set targetService to 1st service whose service type is iMessage
+        set targetBuddy to buddy "{recipient_identifier}" of targetService
+        send "{escaped_msg}" to targetBuddy
+    end tell
+    '''
+    try:
+        subprocess.run(['osascript', '-e', script], check=True, capture_output=True)
+        return True
+    except subprocess.CalledProcessError:
+        # Fallback: simpler script that targets the 'active' chat or a generic buddy string
+        # Useful if the buddy lookup above fails for complex identifiers
+        fallback_script = f'''
+        tell application "Messages"
+            set targetBuddy to (participant 1 of (1st chat whose id contains "{recipient_identifier}"))
+            send "{escaped_msg}" to targetBuddy
+        end tell
+        '''
+        try:
+            subprocess.run(['osascript', '-e', fallback_script], check=True, capture_output=True)
+            return True
+        except Exception:
+            return False

@@ -54,13 +54,10 @@ def resolve_chat_matches(chat_filter: str) -> List[Tuple[float, int, str]]:
             conn.close()
 
     # Also scan messages for any display names that might match Omi directly
-    # Some people put a name in a group chat or individual chat but it's not in Contacts.app
     candidate_terms = [chat_filter]
     aliases = resolve_contacts_aliases(chat_filter)
     if aliases:
         candidate_terms.extend(aliases)
-    
-    # print(f"DEBUG: Searching for terms: {candidate_terms[:5]}...")
     
     matches = []
     
@@ -114,8 +111,6 @@ def resolve_chat_matches(chat_filter: str) -> List[Tuple[float, int, str]]:
             best_score = max(best_score, fuzzy_name_match(term, label))
 
         if best_score > 35:
-            # if best_score > 80:
-            #     print(f"DEBUG: Match chat {chat_id} ({label}) score {best_score}")
             matches.append((best_score, chat_id, label, last_msg_date))
 
     if not matches:
@@ -228,30 +223,26 @@ def list_recent_group_chats(limit: int = 10) -> List[Dict[str, object]]:
         if conn is not None:
             conn.close()
 
-def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None) -> tuple[str, int, Optional[str], bool, Optional[str]]:
+def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None) -> tuple[str, int, Optional[str], bool, Optional[str], Optional[int]]:
     db_path = get_chat_db_path()
     if not os.path.exists(db_path):
-        return "", 0, None, False, None
+        return "", 0, None, False, None, None
 
     matching_chats = resolve_chat_matches(chat_filter)
     if not matching_chats:
-        return "", 0, None, False, None
+        return "", 0, None, False, None, None
 
-    # If the top match is very strong (>= 95) and the second is significantly lower, use it directly.
-    # Otherwise, if there are multiple strong options, ask the user.
     selected_chat = None
     if matching_chats[0][0] >= 95:
         if len(matching_chats) > 1 and matching_chats[1][0] >= 90:
-            # Two very close matches, ask for clarification
             selected_chat = prompt_for_chat_suggestion(matching_chats)
         else:
             selected_chat = matching_chats[0]
     else:
-        # No perfect match, ask user
         selected_chat = prompt_for_chat_suggestion(matching_chats)
 
     if not selected_chat:
-        return "", 0, None, False, None
+        return "", 0, None, False, None, None
 
     best_score, chat_id, resolved_label = selected_chat
     print(f"✅ Matched with '{resolved_label}'")
@@ -290,7 +281,7 @@ def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None) -> t
         rows = cursor.fetchall()
 
         if not rows:
-            return "", 0, resolved_label, is_group_chat, None
+            return "", 0, resolved_label, is_group_chat, None, chat_id
 
         lines = []
         for dt_raw, is_from_me, text, handle_id, display_name in reversed(rows):
@@ -310,9 +301,56 @@ def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None) -> t
                 f"Group chat context: this thread has {len(participants)} participant handles. "
                 f"Known participants: {participant_line}."
             )
-        return "\n".join(lines), len(lines), resolved_label, is_group_chat, chat_context
+        return "\n".join(lines), len(lines), resolved_label, is_group_chat, chat_context, chat_id
     except (sqlite3.OperationalError, sqlite3.DatabaseError):
-        return "", 0, resolved_label, False, None
+        return "", 0, resolved_label, False, None, chat_id
     finally:
         if conn is not None:
             conn.close()
+
+def search_relevant_history(chat_id: int, query_text: str, limit: int = 5) -> str:
+    """Finds old messages in this chat that match keywords in the query_text."""
+    db_path = get_chat_db_path()
+    if not os.path.exists(db_path) or not query_text:
+        return ""
+
+    keywords = [w.strip(",.?!\"") for w in query_text.lower().split() if len(w) > 3]
+    if not keywords:
+        return ""
+
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        conditions = " OR ".join(["m.text LIKE ?" for _ in keywords])
+        params = [f"%{k}%" for k in keywords] + [chat_id, limit]
+        
+        query = f"""
+            SELECT m.date, m.is_from_me, m.text, COALESCE(h.id, h.uncanonicalized_id)
+            FROM message m
+            LEFT JOIN handle h ON h.ROWID = m.handle_id
+            LEFT JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+            WHERE ({conditions})
+              AND m.text IS NOT NULL
+              AND m.associated_message_guid IS NULL
+              AND cmj.chat_id = ?
+            ORDER BY m.date DESC
+            LIMIT ?
+        """
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        
+        if not rows:
+            return ""
+            
+        lines = []
+        for dt_raw, is_from_me, text, handle_id in reversed(rows):
+            speaker = "Me" if is_from_me == 1 else (handle_id or "Them")
+            dt_txt = apple_timestamp_to_iso(dt_raw)
+            cleaned = (text or "").replace("\ufffc", "").replace("\n", " ").strip()
+            lines.append(f"[{dt_txt}] {speaker}: {cleaned}")
+            
+        return "\n".join(lines)
+    except Exception:
+        return ""
+    finally:
+        conn.close()

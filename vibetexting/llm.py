@@ -22,7 +22,15 @@ def _post_json(url: str, payload: dict, timeout: float = DEFAULT_LLM_TIMEOUT) ->
 
 def call_ollama(prompt: str, model: str = "llama3") -> str:
     """Calls a local Ollama instance for truly local generation."""
-    payload = {"model": model, "prompt": prompt, "stream": False}
+    # num_ctx: 8192 allows for more conversation history
+    payload = {
+        "model": model, 
+        "prompt": prompt, 
+        "stream": False,
+        "options": {
+            "num_ctx": 8192
+        }
+    }
     try:
         body = _post_json(OLLAMA_API_URL, payload, timeout=DEFAULT_LLM_TIMEOUT)
         return body.get("response", "").strip()

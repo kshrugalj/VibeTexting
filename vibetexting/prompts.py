@@ -135,30 +135,65 @@ def build_prompt(
     user_name: Optional[str] = None,
     user_intent: Optional[str] = None,
     user_barebones_answer: Optional[str] = None,
+    memories: Optional[str] = None,
+    goal: Optional[str] = None,
 ) -> str:
+    # 1. Start with the core instructions
     system_setup = "You are an AI assistant helping someone respond to a text message."
     if vibe_profile:
+        # Aggressive trim to stay within 4096 tokens
+        max_vibe_chars = 2000
+        if len(vibe_profile) > max_vibe_chars:
+            vibe_profile = vibe_profile[:max_vibe_chars] + "... (truncated)"
         system_setup = (
             "You are an AI assistant that mimics my exact texting style.\n\n"
             f"Here are examples of messages I have sent:\n{vibe_profile}\n\n"
             "Use the EXACT same vocabulary, capitalization style, phrasing, and punctuation habits as the examples above."
         )
+    
     identity_block = ""
     if user_name:
         identity_block = (f"\n\nThe user's name is {user_name}."
                           f" If someone asks for your name or who you are, answer with '{user_name}'.")
-    history_block = ""
-    if chat_history:
-        label = f" for {chat_label}" if chat_label else ""
-        history_block = f"\n\nHere is the conversation history{label}:\n{chat_history}"
-    if chat_context:
-        history_block += f"\n\n{chat_context}"
+    
     intent_block = ""
     if user_intent:
         intent_block = f"\n\nThe user wants to say this in response: {user_intent}"
     if user_barebones_answer:
         intent_block = f"\n\nThe user gave this bare-bones answer to the question: {user_barebones_answer}"
-    return f"""{system_setup}{identity_block}{history_block}{intent_block}
+
+    # 2. Build the history block with smart trimming
+    # Character budget reduced to 2500 to leave room for Memories and instructions
+    history_block = ""
+    if chat_history:
+        label = f" for {chat_label}" if chat_label else ""
+        
+        # Keep the LATEST messages
+        max_history_chars = 2500 
+        if len(chat_history) > max_history_chars:
+            # Find a newline to avoid cutting a message in half
+            cut_index = len(chat_history) - max_history_chars
+            next_newline = chat_history.find("\n", cut_index)
+            if next_newline != -1:
+                chat_history = "... (older history omitted)\n" + chat_history[next_newline:].strip()
+            else:
+                chat_history = "... (older history omitted)\n" + chat_history[cut_index:].strip()
+                
+        history_block = f"\n\nHere is the recent conversation history{label}:\n{chat_history}"
+    
+    if chat_context:
+        history_block += f"\n\n{chat_context}"
+
+    memory_block = ""
+    if memories:
+        memory_block = f"\n\nImportant memories from past conversations:\n{memories}"
+
+    goal_block = ""
+    if goal:
+        goal_block = f"\n\nYour overarching GOAL for this conversation is: {goal}.\n" \
+                     f"Steer the conversation naturally towards this outcome."
+
+    return f"""{system_setup}{identity_block}{history_block}{memory_block}{goal_block}{intent_block}
 
 Incoming message: "{original}"
 
