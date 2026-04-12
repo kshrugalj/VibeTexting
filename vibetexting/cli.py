@@ -19,7 +19,7 @@ from .prompts import (
     prompt_for_barebones_answer,
     build_prompt,
 )
-from .llm import call_local_llm, list_ollama_models, list_lmstudio_models
+from .llm import call_local_llm, list_ollama_models, list_lmstudio_models, start_lmstudio_server, stop_lmstudio_server
 from .utils import get_clipboard_text, send_imessage
 
 # ANSI color codes for prettier CLI
@@ -101,42 +101,42 @@ def run_autopilot(args, config, chat_filter, vibe_content, goal):
     print(f"{CLR_DIM}Press Ctrl+C to stop.{CLR_RESET}\n")
 
     last_history, last_count, resolved_label, is_group_chat, chat_context, chat_id = load_recent_chat_history(chat_filter, 1)
-    
+
     try:
         while True:
             time.sleep(5) # Poll every 5 seconds
             current_history, current_count, _, _, _, _ = load_recent_chat_history(chat_filter, 1)
-            
+
             # If the last message in history has changed and it's not from us
             if current_history != last_history:
                 # Get the actual last message content to see who sent it
                 # We reload with a small limit to inspect the latest
                 history_full, count, label, is_group, context, cid = load_recent_chat_history(chat_filter, args.history_limit or 20)
-                
+
                 # Check if the very last line starts with "Me:"
                 lines = history_full.strip().split("\n")
                 if not lines:
                     continue
-                
+
                 last_line = lines[-1]
                 if "]: Me: " in last_line:
                     # We sent this message, or at least the last message is ours. Skip.
                     last_history = current_history
                     continue
-                
+
                 # New incoming message detected!
                 print(f"\n{CLR_USR}New message detected:{CLR_RESET}")
                 print(f"{CLR_DIM}{last_line}{CLR_RESET}")
-                
+
                 # Extract the message text from the last line (after the speaker label)
                 # Format: [timestamp] Speaker: Text
                 try:
                     original_msg = last_line.split(": ", 1)[1]
                 except IndexError:
                     original_msg = last_line
-                
+
                 memories = search_relevant_history(chat_id, original_msg)
-                
+
                 print(f"{CLR_DIM}Generating autonomous reply...{CLR_RESET}")
                 prompt = build_prompt(
                     original_msg,
@@ -150,9 +150,9 @@ def run_autopilot(args, config, chat_filter, vibe_content, goal):
                     memories,
                     goal
                 )
-                
+
                 reply = call_local_llm(prompt, args.model or "llama3", args.backend or "auto")
-                
+
                 if "Error" not in reply:
                     print(f"{CLR_PRE}🤖 Sending reply:{CLR_RESET} {reply}")
                     success = send_imessage(label, reply)
@@ -162,7 +162,7 @@ def run_autopilot(args, config, chat_filter, vibe_content, goal):
                         print(f"{CLR_ERR}❌ Failed to send via AppleScript.{CLR_RESET}")
                 else:
                     print(f"{CLR_ERR}LLM Error: {reply}{CLR_RESET}")
-                
+
                 last_history = current_history
     except KeyboardInterrupt:
         print(f"\n{CLR_VIBE}--- Auto-Pilot Deactivated ---{CLR_RESET}")
@@ -207,275 +207,295 @@ def main():
         print(f"{CLR_DIM}Loaded defaults from {config['__path__']}{CLR_RESET}")
     print(f"{CLR_DIM}Type {CLR_RESET}/help{CLR_DIM} to see available commands.{CLR_RESET}")
 
+    # Auto-start Gemma/LM Studio server if needed
+    backend = (getattr(args, "backend", None) or "auto").lower()
+    model = (getattr(args, "model", None) or "llama3").lower()
+    started_server = False
+    if backend in {"auto", "lmstudio"} and "gemma" in model:
+        print(f"{CLR_DIM}Checking for Gemma model server...{CLR_RESET}")
+        if start_lmstudio_server():
+            started_server = True
+            print(f"{CLR_PRE}✅ Gemma server started automatically.{CLR_RESET}")
+        else:
+            print(f"{CLR_ERR}⚠️ Could not auto-start Gemma server. Please start LM Studio manually.{CLR_RESET}")
+
     chat_filter = args.chat
     first_run = True
     goal = None
-    
-    while True:
-        vibe_path = args.vibe or "my_vibe_profile.txt"
-        vibe_content = None
-        if os.path.exists(vibe_path):
-            try:
-                with open(vibe_path, "r", encoding="utf-8") as f:
-                    vibe_content = f.read().strip()
-                if first_run:
-                    print(f"{CLR_PRE}✅ Loaded vibe profile: {vibe_path}{CLR_RESET}")
-            except Exception:
-                pass
 
-        # Interactive Prompt
-        if first_run and not args.chat:
-            clipboard = get_clipboard_text()
-            if clipboard:
-                print(f"\n{CLR_USR}Clipboard detected:{CLR_RESET} \"{clipboard[:60]}{'...' if len(clipboard)>60 else ''}\"")
-                choice = input(f"Use this text? (Y/n/command): ").strip().lower()
-                if choice == 'n':
-                    original = input(f"{CLR_PRE}vibetext{CLR_RESET}> ").strip()
-                elif choice != '' and choice != 'y' and choice.startswith('/'):
-                    original = choice
-                elif choice != '' and choice != 'y':
-                    original = choice
-                else:
-                    original = clipboard
-            else:
-                original = input(f"{CLR_PRE}vibetext{CLR_RESET}> ").strip()
-        else:
-            prompt_label = f" ({chat_filter})" if chat_filter else ""
-            original = input(f"{CLR_PRE}vibetext{prompt_label}{CLR_RESET}> ").strip()
-
-        if not original:
-            first_run = False
-            continue
-
-        # Command Handling
-        cmd = original.lower()
-        if cmd in ['exit', 'quit']:
-            print("Goodbye!")
-            break
-        
-        if cmd == '/help':
-            print_help()
-            first_run = False
-            continue
-
-        if cmd.startswith('/goal'):
-            parts = original.split(maxsplit=1)
-            new_goal = parts[1] if len(parts) > 1 else ""
-            if not new_goal:
-                new_goal = input("\nEnter conversation goal (or 'clear' to remove): ").strip()
-            
-            if new_goal.lower() == 'clear':
-                goal = None
-                print(f"{CLR_PRE}✅ Goal cleared.{CLR_RESET}")
-            elif new_goal:
-                goal = new_goal
-                print(f"{CLR_PRE}✅ Goal set to: {goal}{CLR_RESET}")
-            first_run = False
-            continue
-
-        if cmd == '/auto':
-            if not chat_filter:
-                chat_filter = input(f"\n{CLR_USR}Who are you texting?{CLR_RESET} ").strip() or None
-            if chat_filter:
-                goal = run_autopilot(args, config, chat_filter, vibe_content, goal)
-            else:
-                print(f"{CLR_ERR}A recipient must be set for Auto-Pilot.{CLR_RESET}")
-            first_run = False
-            continue
-
-        if cmd == '/models':
-            print(f"\n{CLR_DIM}Fetching available models...{CLR_RESET}")
-            backend_type = (getattr(args, "backend", None) or "auto").lower()
-            all_models = []
-            if backend_type in {"auto", "ollama"}:
-                ollama_list = list_ollama_models()
-                if ollama_list:
-                    print(f"{CLR_BOLD}Ollama:{CLR_RESET} {', '.join(ollama_list)}")
-                    all_models.extend(ollama_list)
-            if backend_type in {"auto", "lmstudio"}:
-                lm_list = list_lmstudio_models()
-                if lm_list:
-                    print(f"{CLR_BOLD}LM Studio:{CLR_RESET} {', '.join(lm_list)}")
-                    all_models.extend(lm_list)
-            
-            if not all_models:
-                print(f"{CLR_ERR}No models found. Check if backends are running.{CLR_RESET}")
-            first_run = False
-            continue
-
-        if cmd.startswith('/model'):
-            parts = original.split(maxsplit=1)
-            new_model = parts[1] if len(parts) > 1 else ""
-            if not new_model:
-                new_model = input("\nEnter new model name: ").strip()
-            if new_model:
-                args.model = new_model
-                config['model'] = new_model
-                save_user_config(config)
-                print(f"{CLR_PRE}✅ Model set to '{new_model}'{CLR_RESET}")
-            first_run = False
-            continue
-
-        if cmd.startswith('/limit'):
-            parts = original.split(maxsplit=1)
-            new_limit = parts[1] if len(parts) > 1 else ""
-            if not new_limit:
-                new_limit = input(f"Enter history limit (current: {args.history_limit}): ").strip()
-            if new_limit:
+    try:
+        while True:
+            vibe_path = args.vibe or "my_vibe_profile.txt"
+            vibe_content = None
+            if os.path.exists(vibe_path):
                 try:
-                    limit_val = int(new_limit)
-                    args.history_limit = limit_val
-                    config['history_limit'] = limit_val
-                    save_user_config(config)
-                    print(f"{CLR_PRE}✅ History limit set to {limit_val}{CLR_RESET}")
-                except ValueError:
-                    print(f"{CLR_ERR}Invalid number.{CLR_RESET}")
-            first_run = False
-            continue
+                    with open(vibe_path, "r", encoding="utf-8") as f:
+                        vibe_content = f.read().strip()
+                    if first_run:
+                        print(f"{CLR_PRE}✅ Loaded vibe profile: {vibe_path}{CLR_RESET}")
+                except Exception:
+                    pass
 
-        if cmd == '/full':
-            args.history_limit = None
-            config['history_limit'] = None
-            save_user_config(config)
-            print(f"{CLR_PRE}✅ Switched to FULL conversation history (no limit).{CLR_RESET}")
-            print(f"{CLR_ERR}Warning: This may exceed your model's context window!{CLR_RESET}")
-            first_run = False
-            continue
-
-        if cmd.startswith('/vibe'):
-            parts = original.split(maxsplit=1)
-            new_vibe = parts[1] if len(parts) > 1 else ""
-            if not new_vibe:
-                new_vibe = input("Enter vibe profile path: ").strip()
-            if new_vibe:
-                if os.path.exists(new_vibe):
-                    args.vibe = new_vibe
-                    config['vibe'] = new_vibe
-                    save_user_config(config)
-                    print(f"{CLR_PRE}✅ Vibe profile set to {new_vibe}{CLR_RESET}")
+            # Interactive Prompt
+            if first_run and not args.chat:
+                clipboard = get_clipboard_text()
+                if clipboard:
+                    print(f"\n{CLR_USR}Clipboard detected:{CLR_RESET} \"{clipboard[:60]}{'...' if len(clipboard)>60 else ''}\"")
+                    choice = input(f"Use this text? (Y/n/command): ").strip().lower()
+                    if choice == 'n':
+                        original = input(f"{CLR_PRE}vibetext{CLR_RESET}> ").strip()
+                    elif choice != '' and choice != 'y' and choice.startswith('/'):
+                        original = choice
+                    elif choice != '' and choice != 'y':
+                        original = choice
+                    else:
+                        original = clipboard
                 else:
-                    print(f"{CLR_ERR}File not found: {new_vibe}{CLR_RESET}")
-            first_run = False
-            continue
-
-        if cmd == '/paste':
-            clip = get_clipboard_text()
-            if clip:
-                original = clip
-                print(f"{CLR_USR}Pasted from clipboard.{CLR_RESET}")
+                    original = input(f"{CLR_PRE}vibetext{CLR_RESET}> ").strip()
             else:
-                print(f"{CLR_ERR}Clipboard is empty.{CLR_RESET}")
+                prompt_label = f" ({chat_filter})" if chat_filter else ""
+                original = input(f"{CLR_PRE}vibetext{prompt_label}{CLR_RESET}> ").strip()
+
+            if not original:
                 first_run = False
                 continue
 
-        if cmd.startswith('/chat'):
-            new_chat = original[5:].strip()
-            if not new_chat:
-                chat_filter = input("\nWho are you texting? ").strip() or None
-            else:
-                chat_filter = new_chat
-            print(f"{CLR_PRE}✅ Recipient switched to '{chat_filter}'{CLR_RESET}")
-            first_run = False
-            continue
+            # Command Handling
+            cmd = original.lower()
+            if cmd in ['exit', 'quit']:
+                print("Goodbye!")
+                break
 
-        if cmd == '/groups':
-            groups = list_recent_group_chats(limit=10)
-            if not groups:
-                print(f"{CLR_ERR}No recent group chats found.{CLR_RESET}")
+            if cmd == '/help':
+                print_help()
+                first_run = False
                 continue
-            print(f"\n{CLR_BOLD}Recent group chats:{CLR_RESET}")
-            for idx, group in enumerate(groups, start=1):
-                print(f"  {idx}. {group['label']} ({group['participant_count']} participants)")
-            selection = input("Pick a number: ").strip()
-            if selection:
-                try:
-                    selected_idx = int(selection)
-                    if 1 <= selected_idx <= len(groups):
-                        chat_filter = groups[selected_idx - 1]["label"]
-                        print(f"{CLR_PRE}✅ Recipient switched to '{chat_filter}'{CLR_RESET}")
+
+            if cmd.startswith('/goal'):
+                parts = original.split(maxsplit=1)
+                new_goal = parts[1] if len(parts) > 1 else ""
+                if not new_goal:
+                    new_goal = input("\nEnter conversation goal (or 'clear' to remove): ").strip()
+
+                if new_goal.lower() == 'clear':
+                    goal = None
+                    print(f"{CLR_PRE}✅ Goal cleared.{CLR_RESET}")
+                elif new_goal:
+                    goal = new_goal
+                    print(f"{CLR_PRE}✅ Goal set to: {goal}{CLR_RESET}")
+                first_run = False
+                continue
+
+            if cmd == '/auto':
+                if not chat_filter:
+                    chat_filter = input(f"\n{CLR_USR}Who are you texting?{CLR_RESET} ").strip() or None
+                if chat_filter:
+                    goal = run_autopilot(args, config, chat_filter, vibe_content, goal)
+                else:
+                    print(f"{CLR_ERR}A recipient must be set for Auto-Pilot.{CLR_RESET}")
+                first_run = False
+                continue
+
+            if cmd == '/models':
+                print(f"\n{CLR_DIM}Fetching available models...{CLR_RESET}")
+                backend_type = (getattr(args, "backend", None) or "auto").lower()
+                all_models = []
+                if backend_type in {"auto", "ollama"}:
+                    ollama_list = list_ollama_models()
+                    if ollama_list:
+                        print(f"{CLR_BOLD}Ollama:{CLR_RESET} {', '.join(ollama_list)}")
+                        all_models.extend(ollama_list)
+                if backend_type in {"auto", "lmstudio"}:
+                    lm_list = list_lmstudio_models()
+                    if lm_list:
+                        print(f"{CLR_BOLD}LM Studio:{CLR_RESET} {', '.join(lm_list)}")
+                        all_models.extend(lm_list)
+
+                if not all_models:
+                    print(f"{CLR_ERR}No models found. Check if backends are running.{CLR_RESET}")
+                first_run = False
+                continue
+
+            if cmd.startswith('/model'):
+                parts = original.split(maxsplit=1)
+                new_model = parts[1] if len(parts) > 1 else ""
+                if not new_model:
+                    new_model = input("\nEnter new model name: ").strip()
+                if new_model:
+                    args.model = new_model
+                    config['model'] = new_model
+                    save_user_config(config)
+                    print(f"{CLR_PRE}✅ Model set to '{new_model}'{CLR_RESET}")
+                first_run = False
+                continue
+
+            if cmd.startswith('/limit'):
+                parts = original.split(maxsplit=1)
+                new_limit = parts[1] if len(parts) > 1 else ""
+                if not new_limit:
+                    new_limit = input(f"Enter history limit (current: {args.history_limit}): ").strip()
+                if new_limit:
+                    try:
+                        limit_val = int(new_limit)
+                        args.history_limit = limit_val
+                        config['history_limit'] = limit_val
+                        save_user_config(config)
+                        print(f"{CLR_PRE}✅ History limit set to {limit_val}{CLR_RESET}")
+                    except ValueError:
+                        print(f"{CLR_ERR}Invalid number.{CLR_RESET}")
+                first_run = False
+                continue
+
+            if cmd == '/full':
+                args.history_limit = None
+                config['history_limit'] = None
+                save_user_config(config)
+                print(f"{CLR_PRE}✅ Switched to FULL conversation history (no limit).{CLR_RESET}")
+                print(f"{CLR_ERR}Warning: This may exceed your model's context window!{CLR_RESET}")
+                first_run = False
+                continue
+
+            if cmd.startswith('/vibe'):
+                parts = original.split(maxsplit=1)
+                new_vibe = parts[1] if len(parts) > 1 else ""
+                if not new_vibe:
+                    new_vibe = input("Enter vibe profile path: ").strip()
+                if new_vibe:
+                    if os.path.exists(new_vibe):
+                        args.vibe = new_vibe
+                        config['vibe'] = new_vibe
+                        save_user_config(config)
+                        print(f"{CLR_PRE}✅ Vibe profile set to {new_vibe}{CLR_RESET}")
                     else:
+                        print(f"{CLR_ERR}File not found: {new_vibe}{CLR_RESET}")
+                first_run = False
+                continue
+
+            if cmd == '/paste':
+                clip = get_clipboard_text()
+                if clip:
+                    original = clip
+                    print(f"{CLR_USR}Pasted from clipboard.{CLR_RESET}")
+                else:
+                    print(f"{CLR_ERR}Clipboard is empty.{CLR_RESET}")
+                    first_run = False
+                    continue
+
+            if cmd.startswith('/chat'):
+                new_chat = original[5:].strip()
+                if not new_chat:
+                    chat_filter = input("\nWho are you texting? ").strip() or None
+                else:
+                    chat_filter = new_chat
+                print(f"{CLR_PRE}✅ Recipient switched to '{chat_filter}'{CLR_RESET}")
+                first_run = False
+                continue
+
+            if cmd == '/groups':
+                groups = list_recent_group_chats(limit=10)
+                if not groups:
+                    print(f"{CLR_ERR}No recent group chats found.{CLR_RESET}")
+                    continue
+                print(f"\n{CLR_BOLD}Recent group chats:{CLR_RESET}")
+                for idx, group in enumerate(groups, start=1):
+                    print(f"  {idx}. {group['label']} ({group['participant_count']} participants)")
+                selection = input("Pick a number: ").strip()
+                if selection:
+                    try:
+                        selected_idx = int(selection)
+                        if 1 <= selected_idx <= len(groups):
+                            chat_filter = groups[selected_idx - 1]["label"]
+                            print(f"{CLR_PRE}✅ Recipient switched to '{chat_filter}'{CLR_RESET}")
+                        else:
+                            print(f"{CLR_ERR}Invalid selection.{CLR_RESET}")
+                    except ValueError:
                         print(f"{CLR_ERR}Invalid selection.{CLR_RESET}")
-                except ValueError:
-                    print(f"{CLR_ERR}Invalid selection.{CLR_RESET}")
+                first_run = False
+                continue
+
+            # If it's not a command, process as a message
+            if not chat_filter:
+                chat_filter = input(f"\n{CLR_USR}Who are you texting?{CLR_RESET} (Enter to skip history): ").strip() or None
+
+            chat_history = None
+            resolved_chat_label = None
+            chat_context = None
+            chat_id = None
+            if chat_filter:
+                print(f"{CLR_DIM}Searching iMessage history for '{chat_filter}'...{CLR_RESET}")
+                chat_history, message_count, resolved_chat_label, is_group_chat, chat_context, chat_id = load_recent_chat_history(chat_filter, args.history_limit)
+                if chat_history:
+                    label = resolved_chat_label or chat_filter
+                    print(f"{CLR_PRE}✅ Loaded {message_count} messages from '{label}'{CLR_RESET}")
+                else:
+                    print(f"{CLR_DIM}No history found. Continuing without context.{CLR_RESET}")
+
             first_run = False
-            continue
 
-        # If it's not a command, process as a message
-        if not chat_filter:
-            chat_filter = input(f"\n{CLR_USR}Who are you texting?{CLR_RESET} (Enter to skip history): ").strip() or None
+            # Search for relevant old memories based on keywords in the current message
+            memories = None
+            if chat_id and original and not original.startswith('/'):
+                memories = search_relevant_history(chat_id, original)
+                if memories:
+                    print(f"{CLR_PRE}✅ Retrieved related memories from past conversations.{CLR_RESET}")
 
-        chat_history = None
-        resolved_chat_label = None
-        chat_context = None
-        chat_id = None
-        if chat_filter:
-            print(f"{CLR_DIM}Searching iMessage history for '{chat_filter}'...{CLR_RESET}")
-            chat_history, message_count, resolved_chat_label, is_group_chat, chat_context, chat_id = load_recent_chat_history(chat_filter, args.history_limit)
-            if chat_history:
-                label = resolved_chat_label or chat_filter
-                print(f"{CLR_PRE}✅ Loaded {message_count} messages from '{label}'{CLR_RESET}")
+            user_intent = None
+            user_barebones_answer = None
+
+            # If a goal is set, skip manual intent prompting
+            if goal:
+                print(f"{CLR_DIM}Steering towards goal: {goal}{CLR_RESET}")
             else:
-                print(f"{CLR_DIM}No history found. Continuing without context.{CLR_RESET}")
-
-        first_run = False
-
-        # Search for relevant old memories based on keywords in the current message
-        memories = None
-        if chat_id and original and not original.startswith('/'):
-            memories = search_relevant_history(chat_id, original)
-            if memories:
-                print(f"{CLR_PRE}✅ Retrieved related memories from past conversations.{CLR_RESET}")
-
-        user_intent = None
-        user_barebones_answer = None
-        
-        # If a goal is set, skip manual intent prompting
-        if goal:
-            print(f"{CLR_DIM}Steering towards goal: {goal}{CLR_RESET}")
-        else:
-            if args.intent_mode == "always":
-                user_intent = prompt_for_intent_choice(original)
-            elif args.intent_mode == "suggest":
-                if is_question_message(original):
-                    user_barebones_answer = prompt_for_barebones_answer(original)
-                elif needs_manual_response(original):
+                if args.intent_mode == "always":
                     user_intent = prompt_for_intent_choice(original)
-            else:
-                if needs_manual_response(original):
-                    user_intent = prompt_for_intent(original)
+                elif args.intent_mode == "suggest":
+                    if is_question_message(original):
+                        user_barebones_answer = prompt_for_barebones_answer(original)
+                    elif needs_manual_response(original):
+                        user_intent = prompt_for_intent_choice(original)
+                else:
+                    if needs_manual_response(original):
+                        user_intent = prompt_for_intent(original)
 
-        backend = getattr(args, "backend", None) or "auto"
-        model = getattr(args, "model", None) or "llama3"
-        print(f"\n{CLR_DIM}Generating reply using {backend} ({model})...{CLR_RESET}")
-        
-        prompt = build_prompt(
-            original,
-            vibe_content,
-            chat_history,
-            resolved_chat_label or chat_filter,
-            chat_context,
-            args.name,
-            user_intent,
-            user_barebones_answer,
-            memories,
-            goal
-        )
-        reply = call_local_llm(prompt, model, backend)
-        
-        print(f"\n{CLR_VIBE}{'='*40}{CLR_RESET}")
-        print(f"{CLR_BOLD}SUGGESTED REPLY:{CLR_RESET}")
-        print(f"{CLR_DIM}{'-'*40}{CLR_RESET}")
-        print(reply)
-        print(f"{CLR_VIBE}{'='*40}{CLR_RESET}")
-        
-        if "Error" not in reply:
-            try:
-                subprocess.run(['pbcopy'], input=reply, encoding='utf-8')
-                print(f"{CLR_DIM}(Copied to clipboard! 📋){CLR_RESET}")
-            except Exception:
-                pass
-        
-        print()
+            backend = getattr(args, "backend", None) or "auto"
+            model = getattr(args, "model", None) or "llama3"
+            print(f"\n{CLR_DIM}Generating reply using {backend} ({model})...{CLR_RESET}")
+
+            prompt = build_prompt(
+                original,
+                vibe_content,
+                chat_history,
+                resolved_chat_label or chat_filter,
+                chat_context,
+                args.name,
+                user_intent,
+                user_barebones_answer,
+                memories,
+                goal
+            )
+            reply = call_local_llm(prompt, model, backend)
+
+            print(f"\n{CLR_VIBE}{'='*40}{CLR_RESET}")
+            print(f"{CLR_BOLD}SUGGESTED REPLY:{CLR_RESET}")
+            print(f"{CLR_DIM}{'-'*40}{CLR_RESET}")
+            print(reply)
+            print(f"{CLR_VIBE}{'='*40}{CLR_RESET}")
+
+            if "Error" not in reply:
+                try:
+                    subprocess.run(['pbcopy'], input=reply, encoding='utf-8')
+                    print(f"{CLR_DIM}(Copied to clipboard! 📋){CLR_RESET}")
+                except Exception:
+                    pass
+
+            print()
+
+    finally:
+        # Stop the Gemma server if we started it
+        if started_server:
+            print(f"\n{CLR_DIM}Stopping Gemma server...{CLR_RESET}")
+            stop_lmstudio_server()
+            print(f"{CLR_PRE}✅ Server stopped.{CLR_RESET}")
 
 if __name__ == "__main__":
     main()
