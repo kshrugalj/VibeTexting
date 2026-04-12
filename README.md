@@ -1,23 +1,36 @@
 # VibeTexting CLI 🎤
 
-A powerful CLI tool to help you respond to text messages faster using AI-powered style-matched response generation. It can run locally with Ollama or via Groq's cloud API.
+A powerful, 100% local AI tool to help you respond to text messages faster using style-matched response generation. VibeTexting learns your unique texting "vibe" from your iMessage history and drafts replies that sound exactly like you.
 
-## Features
+## New Features (v0.1.0)
 
-- 🏠 **Truly Local AI** - Powered by [Ollama](https://ollama.com) to run everything on your machine.
+- 🤖 **Auto-Pilot Mode** - Automatically monitors a specific chat and sends replies based on your style and goals.
+- 🎯 **Conversation Goals** - Set a specific objective (e.g., "Ask them to hang out this weekend") and the AI will steer the conversation towards it.
+- 🧠 **Smart Memories (RAG)** - Automatically retrieves relevant past context from your message history to provide more accurate and personalized replies.
+- ⚡ **Gemma Auto-Start** - Automatically manages LM Studio servers for Gemma models via the `lms` CLI.
+- 👥 **Group Chat Aware** - Full support for group threads with participant-aware history and context.
+
+## Core Features
+
+- 🏠 **Truly Local AI** - Powered by [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai) to run everything on your machine.
 - 🎭 **Personal Vibe Mimicry** - Extracts your iMessage style to sound like *you*.
-- 🎨 **Personal Style Matching** - Uses your sent messages as examples.
+- 🎨 **Personal Style Matching** - Uses your sent messages as few-shot examples.
 - 📋 **Clipboard Integration** - Auto-detect messages from your clipboard.
-- 🧵 **Chat History Context** - Loads the full iMessage conversation for the person you're texting, with a Contacts.app fallback for saved names.
-- 👥 **Group Chat Aware** - Detects group threads, keeps participant-aware history labels, and can list recent groups for quick switching.
+- 🧵 **Chat History Context** - Loads iMessage conversations with Contacts.app fallback for names.
 - 🛠️ **Developer Friendly** - Easy to install and extend.
 
 ## Project Structure
 
 ```
 VibeTexting/
-├── vibetext.py              # Main CLI Tool (Ollama-powered)
-├── extract_imessage_vibe.py  # Mac-only script to learn your style from iMessage
+├── vibetexting/             # Core package
+│   ├── cli.py               # Main CLI entry point
+│   ├── llm.py               # Backend integration (Ollama/LM Studio)
+│   ├── database.py          # iMessage/SQLite integration & Memories
+│   ├── prompts.py           # Intelligent prompt engineering
+│   └── ...
+├── vibetext.py              # Convenient wrapper script
+├── extract_imessage_vibe.py  # Mac-only script to learn your style
 ├── pyproject.toml           # Python package configuration
 └── README.md
 ```
@@ -31,10 +44,9 @@ VibeTexting/
     ```bash
     ollama pull llama3
     ```
+3.  **Optional: LM Studio**: If using LM Studio, install the `lms` CLI for automatic server management.
 
 ### 2. Install VibeTexting
-
-You can install the CLI globally on your Mac/PC:
 
 ```bash
 # Clone the repository
@@ -64,117 +76,55 @@ vibetexting --setup
 
 This writes `~/.vibetexting.json` and stores your name, vibe file, and optional default recipient mapping.
 
-### 1b. Optional User Defaults
-
-If you are publishing this for one person, create a `.vibetexting.json` file in the project folder or `~/.vibetexting.json` in their home directory. The app will load that file first and use it as the default profile.
-
-Example:
-
-```json
-{
-    "name": "Akshay",
-    "vibe": "my_vibe_profile.txt",
-    "model": "llama3",
-    "intent_mode": "suggest",
-    "default_recipient": "mom",
-    "recipients": {
-        "mom": {
-            "chat": "mom",
-            "history_limit": null
-        }
-    }
-}
-```
-
-The `default_recipient` is used when you do not pass `--chat`. Each entry in `recipients` can store its own chat lookup and history limit. Flags like `--name`, `--vibe`, `--chat`, `--model`, `--intent-mode`, and `--history-limit` still override the config when passed.
-
 ### 2. Training on Your Style (Mac Only)
 
 1. Run the extraction script:
    ```bash
    vibe-extract
    ```
-2. **Note:** You will be prompted to grant "Full Disk Access" to Terminal (or your IDE) in *System Settings > Privacy & Security > Full Disk Access* to allow the script to read your iMessage database.
-3. The script creates `my_vibe_profile.txt`.
-4. It also exports recent chat history to `my_chat_history.txt`.
-4. Run `vibetexting` and it will automatically detect this file to mimic your personal texting style!
+2. **Note:** You will be prompted to grant "Full Disk Access" to Terminal (or your IDE) in *System Settings > Privacy & Security > Full Disk Access*.
+3. The script creates `my_vibe_profile.txt` (your style) and `my_chat_history.txt` (recent context).
 
-### Pulling Chat History from Messages
+## Interactive Commands
 
-Use `vibe-extract` with optional filters when you want to mimic one specific conversation style:
-
-```bash
-# Default: sample your sent style + export recent mixed chat history
-vibe-extract
-
-# Pull history for one person/chat name/number
-vibe-extract --chat "mom"
-
-# Export more context into a custom file
-vibe-extract --history-limit 1000 --history-out mom_history.txt --chat "+1415"
-```
-
-Useful flags:
-
-| Argument | Description |
-|----------|-------------|
-| `--chat` | Filter by contact handle (phone/email) or chat display name. |
-| `--limit` | Number of your sent messages sampled for `my_vibe_profile.txt` (default: `150`). |
-| `--history-limit` | Number of recent messages exported for chat history (default: `300`). |
-| `--history-full` | Export the full chat history instead of a limited slice. |
-| `--history-out` | Output file for chat history export (default: `my_chat_history.txt`). |
-
-## Usage Options
-
-```bash
-vibetexting --help
-```
-
-| Argument | Description |
-|----------|-------------|
-| `--model` | Specify the Ollama model to use (default: `llama3`). |
-| `--backend` | Inference backend: `auto`, `ollama`, or `lmstudio` (default: `auto`). |
-| `--name` | Optional name to use when the other person asks who you are. |
-| `--vibe`  | Path to a specific vibe profile text file. |
-| `--chat` | Contact first name, last name, phone number, or email to load recent chat history for. |
-| `--history-limit` | Maximum number of messages to include from that chat. Leave unset to use the full conversation. |
-| `--list-groups` | Print recent group chats with participant counts, then exit. |
-| `--intent-mode` | Choose how to handle messages that need your real intent: `uncertain`, `suggest`, or `always`. |
-| `--loop`, `-l` | Keep the program running to generate multiple replies in a single session. |
-
-To use a model served by LM Studio, start LM Studio Local Server and run:
-
-```bash
-vibetexting --backend lmstudio --model gemma-3-4b-it
-```
-
-If large models are slow to produce the first token, increase request timeout:
-
-```bash
-export VIBETEXT_LMSTUDIO_TIMEOUT_SECONDS=600
-export VIBETEXT_LLM_TIMEOUT_SECONDS=120
-```
-
-In loop mode, you can also use:
+Once inside the `vibetexting` CLI, you can use several slash-commands:
 
 | Command | Description |
 |----------|-------------|
-| `/chat <name-or-number>` | Switch to a different chat target. |
-| `/groups` | Show recent group chats and choose one to switch into. |
+| `/chat [name]` | Switch recipient and load their history. |
+| `/groups` | List and switch to recent group chats. |
+| `/auto` | **Enter Auto-Pilot mode** (monitors and replies automatically). |
+| `/goal [text]` | Set a conversation goal (steers AI automatically). |
+| `/models` | List all available local models (Ollama & LM Studio). |
+| `/model [name]` | Switch to a specific model on the fly. |
+| `/limit [num]` | Change message history context limit. |
+| `/full` | Use the WHOLE conversation as context. |
+| `/vibe [path]` | Switch to a different vibe profile file. |
+| `/paste` | Use text from clipboard as the message to reply to. |
+| `/help` | Show the help menu. |
+| `exit` / `quit` | Exit VibeTexting. |
+
+## Auto-Pilot & Goals
+
+Auto-Pilot (`/auto`) allows VibeTexting to run in the background. It polls your iMessage database every 5 seconds for new incoming messages and automatically drafts and sends a reply.
+
+You can combine this with `/goal` to have the AI autonomously navigate a conversation toward a specific outcome without you needing to manually prompt it for every message.
 
 ## How it Works
 
-1. **Input Detection:** The tool automatically pulls the last text from your clipboard.
-2. **Chat Lookup:** You can provide a contact first name, last name, phone number, email, or group thread name so the tool loads full iMessage history. It also tries Contacts.app when Messages only stores a number/email.
-3. **Intent Check:** For plan/availability/invitation-type messages, the app pauses and asks what you want to say before drafting the reply. In `suggest` mode, it shows a few likely intents first. For simple question-type messages, it prompts you for a "bare-bones answer" (the raw facts) so it can rewrite them in your personal style.
-4. **Vibe Mimicry:** If a `my_vibe_profile.txt` exists, the AI uses "Few-Shot Prompting" to match your specific vocabulary and sentence structure, and it will improvise naturally when there is no exact example.
-5. **Output:** The generated reply is printed to the terminal for you to copy.
+1. **Input Detection:** Automatically pulls the last text from your clipboard or monitors iMessage in Auto-Pilot.
+2. **Chat Lookup:** Intelligent matching for contact names, phone numbers, or group thread titles.
+3. **Context Retrieval (Memories):** Searches your past messages for keywords in the current message to provide the AI with relevant historical context ("What did we talk about last time?").
+4. **Intent Check:** For complex messages, it pauses to ask for your intent or raw facts (in `suggest` mode) before drafting.
+5. **Vibe Mimicry:** Uses "Few-Shot Prompting" with your extracted style to ensure the reply sounds authentic.
+6. **Output:** In manual mode, it copies the reply to your clipboard. In Auto-Pilot, it sends it automatically via AppleScript.
 
 ## Contributing
 
-Future plans include removing the copy-paste requirement and using screen-sharing/computer vision technology to detect messages automatically. 
-
-Feel free to open issues or submit PRs!
+Feel free to open issues or submit PRs! Current roadmap includes:
+- [ ] Improved RAG with vector embeddings.
+- [ ] Support for image/mms attachments.
+- [ ] Web-based UI.
 
 ## License
 

@@ -1,11 +1,68 @@
 import json
 import os
+import subprocess
+import time
 from urllib import error, request
 
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
 LM_STUDIO_BASE_URL = os.environ.get("VIBETEXT_LMSTUDIO_URL", "http://localhost:1234")
 DEFAULT_LLM_TIMEOUT = float(os.environ.get("VIBETEXT_LLM_TIMEOUT_SECONDS", "90"))
 LM_STUDIO_TIMEOUT = float(os.environ.get("VIBETEXT_LMSTUDIO_TIMEOUT_SECONDS", "240"))
+
+_lmstudio_process = None
+
+def is_lmstudio_running() -> bool:
+    """Check if LM Studio server is running."""
+    try:
+        url = f"{LM_STUDIO_BASE_URL.rstrip('/')}/v1/models"
+        with request.urlopen(url, timeout=2) as response:
+            return response.status == 200
+    except Exception:
+        return False
+
+def start_lmstudio_server() -> bool:
+    """Start LM Studio server if not already running."""
+    if is_lmstudio_running():
+        return True
+    
+    try:
+        global _lmstudio_process
+        # Start LM Studio in headless server mode
+        # Using lms command-line interface if available
+        _lmstudio_process = subprocess.Popen(
+            ["lms", "server", "start", "-p", "1234"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        # Wait for server to be ready
+        for _ in range(30):  # Wait up to 30 seconds
+            time.sleep(1)
+            if is_lmstudio_running():
+                return True
+        return False
+    except FileNotFoundError:
+        # lms CLI not available, try alternative startup
+        return False
+    except Exception:
+        return False
+
+def stop_lmstudio_server() -> bool:
+    """Stop LM Studio server if we started it."""
+    global _lmstudio_process
+    try:
+        if _lmstudio_process is not None:
+            # Try to stop via lms CLI
+            subprocess.run(
+                ["lms", "server", "stop"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5
+            )
+            _lmstudio_process = None
+            return True
+    except Exception:
+        pass
+    return False
 
 def _post_json(url: str, payload: dict, timeout: float = DEFAULT_LLM_TIMEOUT) -> dict:
     data = json.dumps(payload).encode("utf-8")
@@ -22,7 +79,15 @@ def _post_json(url: str, payload: dict, timeout: float = DEFAULT_LLM_TIMEOUT) ->
 
 def call_ollama(prompt: str, model: str = "llama3") -> str:
     """Calls a local Ollama instance for truly local generation."""
-    payload = {"model": model, "prompt": prompt, "stream": False}
+    # num_ctx: 8192 allows for more conversation history
+    payload = {
+        "model": model, 
+        "prompt": prompt, 
+        "stream": False,
+        "options": {
+            "num_ctx": 8192
+        }
+    }
     try:
         body = _post_json(OLLAMA_API_URL, payload, timeout=DEFAULT_LLM_TIMEOUT)
         return body.get("response", "").strip()

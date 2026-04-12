@@ -19,12 +19,13 @@ def apple_timestamp_to_iso(raw_date):
     except Exception:
         return "unknown-time"
 
-def resolve_chat_matches(chat_filter: str) -> List[Tuple[float, int, str]]:
+def resolve_chat_matches(chat_filter: str, auto_select: bool = False) -> List[Tuple[float, int, str]]:
     db_path = get_chat_db_path()
     if not os.path.exists(db_path):
         return []
 
-    print(f"📊 Searching iMessage database...")
+    if not auto_select:
+        print(f"📊 Searching iMessage database...")
     conn = None
     try:
         conn = sqlite3.connect(db_path)
@@ -38,8 +39,8 @@ def resolve_chat_matches(chat_filter: str) -> List[Tuple[float, int, str]]:
                 c.chat_identifier,
                 h.id as handle_id,
                 h.uncanonicalized_id,
-                (SELECT MAX(date) FROM message m 
-                 JOIN chat_message_join cmj ON m.ROWID = cmj.message_id 
+                (SELECT MAX(date) FROM message m
+                 JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
                  WHERE cmj.chat_id = c.ROWID) as last_msg_date
             FROM chat c
             LEFT JOIN chat_handle_join chj ON chj.chat_id = c.ROWID
@@ -47,6 +48,10 @@ def resolve_chat_matches(chat_filter: str) -> List[Tuple[float, int, str]]:
             """
         )
         rows = cursor.fetchall()
+        
+        # Debug: Log total chats found
+        if not auto_select:
+            print(f"[DEBUG] Total chats in database: {len(rows)}")
     except (sqlite3.OperationalError, sqlite3.DatabaseError):
         return []
     finally:
@@ -54,16 +59,16 @@ def resolve_chat_matches(chat_filter: str) -> List[Tuple[float, int, str]]:
             conn.close()
 
     # Also scan messages for any display names that might match Omi directly
-    # Some people put a name in a group chat or individual chat but it's not in Contacts.app
     candidate_terms = [chat_filter]
     aliases = resolve_contacts_aliases(chat_filter)
     if aliases:
         candidate_terms.extend(aliases)
     
-    # print(f"DEBUG: Searching for terms: {candidate_terms[:5]}...")
-    
+    if not auto_select:
+        print(f"[DEBUG] Searching for terms: {candidate_terms}")
+
     matches = []
-    
+
     chat_data = {}
     for chat_id, display_name, chat_identifier, handle_id, uncanonicalized_id, last_msg_date in rows:
         if chat_id is None:
@@ -80,52 +85,92 @@ def resolve_chat_matches(chat_filter: str) -> List[Tuple[float, int, str]]:
         if uncanonicalized_id:
             chat_data[chat_id]["handles"].add(uncanonicalized_id)
 
+    # Debug: Log chat types
+    dm_count = 0
+    group_count = 0
     for chat_id, data in chat_data.items():
         display_name = data["display_name"]
         chat_identifier = data["chat_identifier"]
         handles = data["handles"]
-        last_msg_date = data["last_msg_date"]
+        
+        # Determine if it's a DM or group
+        is_group = len(handles) > 1
+        if is_group:
+            group_count += 1
+        else:
+            dm_count += 1
         
         label = _build_chat_label(chat_id, display_name, chat_identifier, handles)
 
         best_score = 0.0
         for term in candidate_terms:
             normalized_term = normalize_chat_key(term)
-            
+
             # 1. Check display name
             if display_name:
-                best_score = max(best_score, fuzzy_name_match(term, display_name))
-            
+                score = fuzzy_name_match(term, display_name)
+                if score > best_score:
+                    best_score = score
+                    if not auto_select and score > 35:
+                        print(f"[DEBUG] Match via display_name '{display_name}' with term '{term}': {score}")
+
             # 2. Check chat identifier
             if chat_identifier:
-                best_score = max(best_score, fuzzy_name_match(term, chat_identifier))
-                if normalized_term and normalized_term in normalize_chat_key(chat_identifier):
-                    best_score = max(best_score, 90.0)
+                score = fuzzy_name_match(term, chat_identifier)
+                if score > best_score:
+                    best_score = score
+                    if not auto_select and score > 35:
+                        print(f"[DEBUG] Match via chat_identifier '{chat_identifier}' with term '{term}': {score}")
                 
+                if normalized_term and normalized_term in normalize_chat_key(chat_identifier):
+                    if 90.0 > best_score:
+                        best_score = 90.0
+                        if not auto_select:
+                            print(f"[DEBUG] Match via normalized chat_identifier '{chat_identifier}': 90.0")
+
             # 3. Check handles (phone/email)
             for h in handles:
-                best_score = max(best_score, fuzzy_name_match(term, h))
+                score = fuzzy_name_match(term, h)
+                if score > best_score:
+                    best_score = score
+                    if not auto_select and score > 35:
+                        print(f"[DEBUG] Match via handle '{h}' with term '{term}': {score}")
+                
                 if normalize_chat_key(h) == normalized_term:
-                    best_score = 100.0
+                    if 100.0 > best_score:
+                        best_score = 100.0
+                        if not auto_select:
+                            print(f"[DEBUG] Exact match via handle '{h}': 100.0")
                 elif normalized_term and normalized_term in normalize_chat_key(h):
-                    best_score = max(best_score, 90.0)
-            
+                    if 90.0 > best_score:
+                        best_score = 90.0
+                        if not auto_select:
+                            print(f"[DEBUG] Partial match via handle '{h}': 90.0")
+
             # 4. Check the label
-            best_score = max(best_score, fuzzy_name_match(term, label))
+            score = fuzzy_name_match(term, label)
+            if score > best_score:
+                best_score = score
 
         if best_score > 35:
-            # if best_score > 80:
-            #     print(f"DEBUG: Match chat {chat_id} ({label}) score {best_score}")
+            chat_type = "GROUP" if len(handles) > 1 else "DM"
+            if not auto_select:
+                print(f"[DEBUG] [{chat_type}] Chat ID {chat_id}: '{label}' - Score: {best_score}")
             matches.append((best_score, chat_id, label, last_msg_date))
+    
+    if not auto_select:
+        print(f"[DEBUG] Summary: {dm_count} DMs, {group_count} groups scanned")
 
     if not matches:
-        print("❌ No matching chats found in iMessage database.")
+        if not auto_select:
+            print("❌ No matching chats found in iMessage database.")
         return []
 
     # Sort primarily by fuzzy score, secondarily by recency
     matches.sort(key=lambda item: (item[0], item[3]), reverse=True)
-    
-    print(f"✅ Found {len(matches)} potential chat matches.")
+
+    if not auto_select:
+        print(f"✅ Found {len(matches)} potential chat matches.")
     # Return matches in original format (score, id, label)
     return [(m[0], m[1], m[2]) for m in matches]
 
@@ -228,33 +273,36 @@ def list_recent_group_chats(limit: int = 10) -> List[Dict[str, object]]:
         if conn is not None:
             conn.close()
 
-def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None) -> tuple[str, int, Optional[str], bool, Optional[str]]:
+def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None, auto_select: bool = False) -> tuple[str, int, Optional[str], bool, Optional[str], Optional[int], Optional[str]]:
     db_path = get_chat_db_path()
     if not os.path.exists(db_path):
-        return "", 0, None, False, None
+        return "", 0, None, False, None, None, None
 
-    matching_chats = resolve_chat_matches(chat_filter)
+    matching_chats = resolve_chat_matches(chat_filter, auto_select=auto_select)
     if not matching_chats:
-        return "", 0, None, False, None
+        return "", 0, None, False, None, None, None
 
-    # If the top match is very strong (>= 95) and the second is significantly lower, use it directly.
-    # Otherwise, if there are multiple strong options, ask the user.
     selected_chat = None
-    if matching_chats[0][0] >= 95:
+    if auto_select:
+        # In autopilot mode, always select the best match without prompting
+        selected_chat = matching_chats[0]
+        print(f"[DEBUG] Auto-selected best match with score: {selected_chat[0]}")
+    elif matching_chats[0][0] >= 95:
         if len(matching_chats) > 1 and matching_chats[1][0] >= 90:
-            # Two very close matches, ask for clarification
             selected_chat = prompt_for_chat_suggestion(matching_chats)
         else:
             selected_chat = matching_chats[0]
     else:
-        # No perfect match, ask user
         selected_chat = prompt_for_chat_suggestion(matching_chats)
 
     if not selected_chat:
-        return "", 0, None, False, None
+        return "", 0, None, False, None, None, None
 
     best_score, chat_id, resolved_label = selected_chat
-    print(f"✅ Matched with '{resolved_label}'")
+    if auto_select:
+        print(f"✅ Auto-selected '{resolved_label}' (confidence: {best_score:.1f}%)")
+    else:
+        print(f"✅ Matched with '{resolved_label}'")
 
     conn = None
     try:
@@ -262,6 +310,18 @@ def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None) -> t
         cursor = conn.cursor()
         participants = _get_chat_participants(conn, chat_id)
         is_group_chat = len(participants) > 1
+
+        # Get the actual chat_identifier (GUID) for AppleScript targeting
+        cursor.execute(
+            """
+            SELECT chat_identifier, display_name
+            FROM chat
+            WHERE ROWID = ?
+            """,
+            [chat_id]
+        )
+        chat_info = cursor.fetchone()
+        chat_guid = chat_info[0] if chat_info else None
 
         query = f"""
             SELECT
@@ -290,7 +350,7 @@ def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None) -> t
         rows = cursor.fetchall()
 
         if not rows:
-            return "", 0, resolved_label, is_group_chat, None
+            return "", 0, resolved_label, is_group_chat, None, chat_id
 
         lines = []
         for dt_raw, is_from_me, text, handle_id, display_name in reversed(rows):
@@ -310,9 +370,56 @@ def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None) -> t
                 f"Group chat context: this thread has {len(participants)} participant handles. "
                 f"Known participants: {participant_line}."
             )
-        return "\n".join(lines), len(lines), resolved_label, is_group_chat, chat_context
+        return "\n".join(lines), len(lines), resolved_label, is_group_chat, chat_context, chat_id, chat_guid
     except (sqlite3.OperationalError, sqlite3.DatabaseError):
-        return "", 0, resolved_label, False, None
+        return "", 0, resolved_label, False, None, chat_id, None
     finally:
         if conn is not None:
             conn.close()
+
+def search_relevant_history(chat_id: int, query_text: str, limit: int = 5) -> str:
+    """Finds old messages in this chat that match keywords in the query_text."""
+    db_path = get_chat_db_path()
+    if not os.path.exists(db_path) or not query_text:
+        return ""
+
+    keywords = [w.strip(",.?!\"") for w in query_text.lower().split() if len(w) > 3]
+    if not keywords:
+        return ""
+
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        conditions = " OR ".join(["m.text LIKE ?" for _ in keywords])
+        params = [f"%{k}%" for k in keywords] + [chat_id, limit]
+        
+        query = f"""
+            SELECT m.date, m.is_from_me, m.text, COALESCE(h.id, h.uncanonicalized_id)
+            FROM message m
+            LEFT JOIN handle h ON h.ROWID = m.handle_id
+            LEFT JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+            WHERE ({conditions})
+              AND m.text IS NOT NULL
+              AND m.associated_message_guid IS NULL
+              AND cmj.chat_id = ?
+            ORDER BY m.date DESC
+            LIMIT ?
+        """
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        
+        if not rows:
+            return ""
+            
+        lines = []
+        for dt_raw, is_from_me, text, handle_id in reversed(rows):
+            speaker = "Me" if is_from_me == 1 else (handle_id or "Them")
+            dt_txt = apple_timestamp_to_iso(dt_raw)
+            cleaned = (text or "").replace("\ufffc", "").replace("\n", " ").strip()
+            lines.append(f"[{dt_txt}] {speaker}: {cleaned}")
+            
+        return "\n".join(lines)
+    except Exception:
+        return ""
+    finally:
+        conn.close()

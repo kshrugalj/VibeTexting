@@ -87,6 +87,4 @@ def merge_runtime_settings(args: argparse.Namespace, config: dict) -> argparse.N
         args.intent_mode = DEFAULT_INTENT_MODE
     if isinstance(recipient_config, dict) and recipient_config.get("intent_mode"):
         args.intent_mode = recipient_config.get("intent_mode")
-    if not getattr(args, "loop", None) and config.get("loop"):
-        args.loop = True
     return args

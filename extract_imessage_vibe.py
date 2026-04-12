@@ -45,7 +45,7 @@ def build_match_clause(chat_filter):
     return clause, [like_val, like_val]
 
 
-def extract_vibe(limit=150, chat_filter=None, history_limit=300, history_out="my_chat_history.txt", history_full=False):
+def extract_vibe(limit=150, chat_filter=None, history_limit=300, history_out="my_chat_history.txt", history_full=False, cutoff_date=None):
     db_path = get_chat_db_path()
     if not os.path.exists(db_path):
         print(f"Error: Could not find iMessage database at {db_path}")
@@ -59,11 +59,26 @@ def extract_vibe(limit=150, chat_filter=None, history_limit=300, history_out="my
 
         print("Analyzing iMessage database (this is 100% local and private)...")
         match_clause, match_params = build_match_clause(chat_filter)
+        
+        # Add date filter if cutoff_date is provided
+        date_clause = ""
+        date_params = []
+        if cutoff_date:
+            # Convert date string to Apple timestamp
+            try:
+                cutoff_dt = datetime.strptime(cutoff_date, "%Y-%m-%d")
+                apple_ts = int((cutoff_dt - APPLE_EPOCH).total_seconds())
+                date_clause = "AND m.date < ?"
+                date_params = [apple_ts]
+                print(f"📅 Filtering messages before: {cutoff_date}")
+            except ValueError:
+                print(f"⚠️ Invalid date format: {cutoff_date}. Use YYYY-MM-DD format.")
+                sys.exit(1)
 
         # Query messages sent by the user (is_from_me = 1)
         # Filter out tapbacks, URLs, attachments, and extremely long/short texts
         query = f"""
-            SELECT m.text
+            SELECT m.text, m.date
             FROM message m
             LEFT JOIN handle h ON h.ROWID = m.handle_id
             LEFT JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
@@ -78,10 +93,11 @@ def extract_vibe(limit=150, chat_filter=None, history_limit=300, history_out="my
               AND m.associated_message_guid IS NULL
               AND ifnull(m.cache_has_attachments, 0) = 0
               {match_clause}
+              {date_clause}
             ORDER BY m.date DESC
             LIMIT 5000
         """
-        cursor.execute(query, match_params)
+        cursor.execute(query, match_params + date_params)
         rows = cursor.fetchall()
 
         # Exclude Apple's auto-generated tapback messages (Loved "...", Liked "...")
@@ -129,10 +145,11 @@ def extract_vibe(limit=150, chat_filter=None, history_limit=300, history_out="my
               AND m.associated_message_guid IS NULL
               {'' if history_full else 'AND m.is_from_me = 1'}
               {match_clause}
+              {date_clause}
             ORDER BY m.date DESC
             {'' if history_full or history_limit is None else 'LIMIT ?'}
         """
-        history_params = [*match_params]
+        history_params = [*match_params, *date_params]
         if not history_full and history_limit is not None:
             history_params.append(history_limit)
         cursor.execute(history_query, history_params)
@@ -155,8 +172,12 @@ def extract_vibe(limit=150, chat_filter=None, history_limit=300, history_out="my
         else:
             print(f"Success! Exported {len(history_rows)} of your sent messages to '{history_out}'.")
         print("\nThese messages will be used as few-shot examples to teach the local AI your texting style.")
+        if cutoff_date:
+            print(f"\n✅ Only includes messages sent BEFORE {cutoff_date} (excludes AI-generated autopilot messages)")
+        else:
+            print("\n💡 Tip: Use --cutoff-date YYYY-MM-DD to exclude AI-generated autopilot messages")
         print("\nTo use your new vibe profile, run:")
-        print("  python3 vibetext.py --local --vibe my_vibe_profile.txt")
+        print("  vibetexting --vibe my_vibe_profile.txt")
         return 0
 
     except (sqlite3.OperationalError, sqlite3.DatabaseError) as e:
@@ -181,6 +202,7 @@ def main():
     parser.add_argument("--history-limit", type=int, default=300, help="Max messages to export for chat history")
     parser.add_argument("--history-full", action="store_true", help="Export the full chat history instead of a limited slice")
     parser.add_argument("--history-out", default="my_chat_history.txt", help="Output file for chat history")
+    parser.add_argument("--cutoff-date", help="Only include messages BEFORE this date (YYYY-MM-DD). Use to exclude AI-generated autopilot messages.")
     args = parser.parse_args()
 
     return extract_vibe(
@@ -189,6 +211,7 @@ def main():
         history_limit=args.history_limit,
         history_out=args.history_out,
         history_full=args.history_full,
+        cutoff_date=getattr(args, 'cutoff_date', None),
     )
 
 
