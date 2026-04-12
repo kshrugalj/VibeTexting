@@ -85,6 +85,13 @@ This writes `~/.vibetexting.json` and stores your name, vibe file, and optional 
 2. **Note:** You will be prompted to grant "Full Disk Access" to Terminal (or your IDE) in *System Settings > Privacy & Security > Full Disk Access*.
 3. The script creates `my_vibe_profile.txt` (your style) and `my_chat_history.txt` (recent context).
 
+**💡 Pro Tip: Excluding AI Messages**
+If you've been using Auto-Pilot, your iMessage history will contain messages written by the AI. To ensure you only train on *your* real messages, use the cutoff flag:
+```bash
+vibe-extract --cutoff-date 2024-01-01
+```
+This ensures your "vibe" profile stays authentic to your actual writing style.
+
 ## Interactive Commands
 
 Once inside the `vibetexting` CLI, you can use several slash-commands:
