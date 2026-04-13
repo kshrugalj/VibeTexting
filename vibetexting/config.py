@@ -9,6 +9,9 @@ DEFAULT_INTENT_MODE = "uncertain"
 DEFAULT_HISTORY_LIMIT = 20
 INTENT_MODES = {"always", "uncertain", "suggest"}
 
+def get_chat_db_path():
+    return os.path.expanduser('~/Library/Messages/chat.db')
+
 def load_user_config() -> dict:
     config_candidates = [
         os.path.join(os.getcwd(), ".vibetexting.json"),

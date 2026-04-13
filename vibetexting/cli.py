@@ -10,7 +10,14 @@ from .config import (
     DEFAULT_INTENT_MODE,
     INTENT_MODES,
 )
-from .database import load_recent_chat_history, list_recent_group_chats, search_relevant_history
+from .database import (
+    load_recent_chat_history,
+    list_recent_group_chats,
+    search_relevant_history,
+    resolve_chat_matches,
+    get_latest_message_date,
+    get_latest_message_for_chat
+)
 from .prompts import (
     needs_manual_response,
     is_question_message,
@@ -43,6 +50,7 @@ def print_help():
     print(f"  {CLR_PRE}/auto{CLR_RESET}           - Enter Auto-Pilot mode (monitors and replies automatically)")
     print(f"  {CLR_PRE}/vibe [path]{CLR_RESET}   - Switch vibe profile file")
     print(f"  {CLR_PRE}/paste{CLR_RESET}        - Use text from clipboard as message")
+    print(f"  {CLR_PRE}/auto [mins]{CLR_RESET}   - Auto-reply mode (monitors for new messages)")
     print(f"  {CLR_PRE}/help{CLR_RESET}         - Show this menu")
     print(f"  {CLR_PRE}exit{CLR_RESET} or {CLR_PRE}quit{CLR_RESET}  - Exit VibeText")
     print(f"\nJust type your message and press Enter to generate a reply.")
