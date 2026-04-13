@@ -115,56 +115,60 @@ def run_autopilot(args, config, chat_filter, vibe_content, goal):
     print(f"{CLR_DIM}[DEBUG]   model: {args.model or 'llama3'}{CLR_RESET}")
     print(f"{CLR_DIM}[DEBUG]   backend: {args.backend or 'auto'}{CLR_RESET}\n")
 
-    last_history, last_count, resolved_label, is_group_chat, chat_context, chat_id, chat_guid = load_recent_chat_history(chat_filter, 1, auto_select=True)
+    # Initialize last_history to None so the first poll iteration can process the current state
+    # This allows it to "carry on the conversation" from the last existing message.
+    _, initial_count, resolved_label, is_group_chat, chat_context, chat_id, chat_guid, last_is_from_me = load_recent_chat_history(chat_filter, 1, auto_select=True)
+    last_history = None
     
-    # Debug: Log initial history load
-    print(f"{CLR_DIM}[DEBUG] Initial history loaded:{CLR_RESET}")
-    print(f"{CLR_DIM}[DEBUG]   last_count: {last_count}{CLR_RESET}")
-    print(f"{CLR_DIM}[DEBUG]   resolved_label: {resolved_label}{CLR_RESET}")
-    print(f"{CLR_DIM}[DEBUG]   is_group_chat: {is_group_chat}{CLR_RESET}")
-    print(f"{CLR_DIM}[DEBUG]   chat_id: {chat_id}{CLR_RESET}")
-    print(f"{CLR_DIM}[DEBUG]   chat_guid: {chat_guid}{CLR_RESET}")
-    print(f"{CLR_DIM}[DEBUG]   history length: {len(last_history) if last_history else 0} chars{CLR_RESET}\n")
+    if not chat_id:
+        print(f"{CLR_ERR}Could not resolve chat for Auto-Pilot monitoring.{CLR_RESET}")
+        return goal
+
+    print(f"{CLR_DIM}[DEBUG] Auto-Pilot Monitoring:{CLR_RESET}")
+    print(f"{CLR_DIM}[DEBUG]   Recipient: {resolved_label} (ID: {chat_id}){CLR_RESET}")
+    
+    if initial_count == 0:
+        print(f"{CLR_ERR}⚠️ No messages found in this chat. If you are on restricted WiFi, iMessage may not be syncing to this Mac.{CLR_RESET}")
+        print(f"{CLR_DIM}Check if new messages are appearing in your macOS Messages app.{CLR_RESET}")
+    else:
+        status = f"Last message from {resolved_label}." if not last_is_from_me else "Last message from you."
+        print(f"{CLR_PRE}✅ Ready. {status}{CLR_RESET}")
+    print()
 
     iteration = 0
     try:
         while True:
             iteration += 1
-            print(f"\n{CLR_DIM}[DEBUG] === Polling iteration #{iteration} ==={CLR_RESET}")
-            time.sleep(5) # Poll every 5 seconds
+            # Poll every 5 seconds
+            if iteration > 1:
+                time.sleep(5)
             
-            print(f"{CLR_DIM}[DEBUG] Loading current history with filter: '{chat_filter}'{CLR_RESET}")
-            current_history, current_count, _, _, _, _, current_chat_guid = load_recent_chat_history(chat_filter, 1, auto_select=True)
-            print(f"{CLR_DIM}[DEBUG] Current history length: {len(current_history) if current_history else 0} chars, count: {current_count}{CLR_RESET}")
+            # Use fixed chat_id for polling to avoid re-resolution issues
+            current_history, current_count, _, _, _, _, _, current_is_from_me = load_recent_chat_history(resolved_label, 1, auto_select=True, chat_id=chat_id)
 
-            # If the last message in history has changed and it's not from us
-            if current_history != last_history:
-                print(f"{CLR_DIM}[DEBUG] History changed! Old length: {len(last_history) if last_history else 0}, New length: {len(current_history) if current_history else 0}{CLR_RESET}")
+            # If this is the first poll or history has changed (either text or count)
+            if (current_history, current_count) != last_history:
+                if last_history is not None:
+                    print(f"\n{CLR_VIBE}🔔 New activity detected! (Total: {current_count}){CLR_RESET}")
                 
                 # Get the actual last message content to see who sent it
-                # We reload with a small limit to inspect the latest
-                history_full, count, label, is_group, context, cid, cguid = load_recent_chat_history(chat_filter, args.history_limit or 20, auto_select=True)
+                history_full, count, label, is_group, context, cid, cguid, is_from_me_latest = load_recent_chat_history(resolved_label, args.history_limit or 20, auto_select=True, chat_id=chat_id)
 
-                # Debug: Log the full history
-                print(f"{CLR_DIM}[DEBUG] Reloaded history_full length: {len(history_full) if history_full else 0} chars{CLR_RESET}")
-                
-                # Check if the very last line starts with "Me:"
                 lines = history_full.strip().split("\n")
                 if not lines:
-                    print(f"{CLR_DIM}[DEBUG] No lines in history, skipping{CLR_RESET}")
+                    last_history = (current_history, current_count)
+                    continue
+
+                if is_from_me_latest:
+                    # We sent this message. Skip replying but update last_history.
+                    if last_history is not None:
+                        print(f"{CLR_DIM}Last message is from you. Monitoring for a reply...{CLR_RESET}")
+                    last_history = (current_history, current_count)
                     continue
 
                 last_line = lines[-1]
-                print(f"{CLR_DIM}[DEBUG] Last line: {last_line}{CLR_RESET}")
-                
-                if "]: Me: " in last_line:
-                    # We sent this message, or at least the last message is ours. Skip.
-                    print(f"{CLR_DIM}[DEBUG] Last message is from us, skipping{CLR_RESET}")
-                    last_history = current_history
-                    continue
-
-                # New incoming message detected!
-                print(f"\n{CLR_USR}New message detected:{CLR_RESET}")
+                # New incoming message detected (or starting from an incoming message)
+                print(f"\n{CLR_USR}Last message from {label}:{CLR_RESET}")
                 print(f"{CLR_DIM}{last_line}{CLR_RESET}")
 
                 # Extract the message text from the last line (after the speaker label)
@@ -222,9 +226,9 @@ def run_autopilot(args, config, chat_filter, vibe_content, goal):
                 else:
                     print(f"{CLR_ERR}LLM Error: {reply}{CLR_RESET}")
 
-                last_history = current_history
+                last_history = (current_history, current_count)
             else:
-                print(f"{CLR_DIM}[DEBUG] No history change, continuing...{CLR_RESET}")
+                pass
     except KeyboardInterrupt:
         print(f"\n{CLR_VIBE}--- Auto-Pilot Deactivated ---{CLR_RESET}")
         return goal

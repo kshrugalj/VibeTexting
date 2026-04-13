@@ -59,10 +59,10 @@ def resolve_contacts_aliases(chat_filter: str) -> list[str]:
             print(f"⚠️ AppleScript failed with code {result.returncode}: {result.stderr}")
         return []
 
-    aliases = []
+    # Collect all matches with their scores
+    contact_matches = []
     lines = result.stdout.strip().split("\n")
     
-    match_count = 0
     for line in lines:
         line = line.strip()
         if not line:
@@ -75,34 +75,52 @@ def resolve_contacts_aliases(chat_filter: str) -> list[str]:
         phone_blob = parts[1]
         email_blob = parts[2]
         
-        # Scoring
-        match_score = fuzzy_name_match(chat_filter, person_name)
-        
         # Check phones/emails for direct match too
         phones = [p.strip() for p in phone_blob.split(",") if p.strip()]
         emails = [e.strip() for e in email_blob.split(",") if e.strip()]
-        
         all_contact_identifiers = [person_name] + phones + emails
+
+        # Scoring
+        best_match_score = fuzzy_name_match(chat_filter, person_name)
         
-        is_match = False
-        if match_score > 70:
-            is_match = True
-        else:
-            # Check for direct identifier match
-            for ident in all_contact_identifiers:
-                if fuzzy_name_match(chat_filter, ident) > 90:
-                    is_match = True
-                    break
+        # Check for better matches in phones/emails
+        for ident in all_contact_identifiers:
+            score = fuzzy_name_match(chat_filter, ident)
+            if score > best_match_score:
+                best_match_score = score
         
-        if is_match:
-            match_count += 1
-            for ident in all_contact_identifiers:
-                if ident:
-                    aliases.append(ident)
+        if best_match_score > 70:
+            contact_matches.append((best_match_score, all_contact_identifiers))
+
+    if not contact_matches:
+        return []
+
+    # Sort by score descending
+    contact_matches.sort(key=lambda x: x[0], reverse=True)
+    
+    top_score = contact_matches[0][0]
+    
+    # Filter to keep only the best matches
+    # If we have 100% matches, ONLY keep those.
+    # Otherwise, keep everything within a small margin of the top score (e.g., 5 points)
+    filtered_identifiers = []
+    match_count = 0
+    
+    for score, identifiers in contact_matches:
+        if top_score == 100:
+            if score < 100:
+                break
+        elif score < (top_score - 5):
+            break
+            
+        match_count += 1
+        for ident in identifiers:
+            if ident:
+                filtered_identifiers.append(ident)
 
     unique_aliases = []
     seen = set()
-    for alias in aliases:
+    for alias in filtered_identifiers:
         key = normalize_chat_key(alias)
         if not key or key in seen:
             continue
