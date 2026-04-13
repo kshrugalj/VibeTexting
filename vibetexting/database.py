@@ -352,10 +352,10 @@ def get_latest_message_for_chat(chat_id: int, after_date: Optional[int] = None) 
         if conn is not None:
             conn.close()
 
-def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None, auto_select: bool = False, chat_id: Optional[int] = None) -> tuple[str, int, Optional[str], bool, Optional[str], Optional[int], Optional[str]]:
+def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None, auto_select: bool = False, chat_id: Optional[int] = None) -> tuple[str, int, Optional[str], bool, Optional[str], Optional[int], Optional[str], bool]:
     db_path = get_chat_db_path()
     if not os.path.exists(db_path):
-        return "", 0, None, False, None, None, None
+        return "", 0, None, False, None, None, None, False
 
     resolved_label = None
     was_group_match = False
@@ -363,7 +363,7 @@ def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None, auto
     if chat_id is None:
         matching_chats = resolve_chat_matches(chat_filter, auto_select=auto_select)
         if not matching_chats:
-            return "", 0, None, False, None, None, None
+            return "", 0, None, False, None, None, None, False
 
         selected_chat = None
         if auto_select:
@@ -379,7 +379,7 @@ def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None, auto
             selected_chat = prompt_for_chat_suggestion(matching_chats)
 
         if not selected_chat:
-            return "", 0, None, False, None, None, None
+            return "", 0, None, False, None, None, None, False
 
         best_score, chat_id, resolved_label, was_group_match = selected_chat
         if auto_select:
@@ -437,7 +437,7 @@ def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None, auto
         rows = cursor.fetchall()
 
         if not rows:
-            return "", 0, resolved_label, is_group_chat, None, chat_id, chat_guid
+            return "", 0, resolved_label, is_group_chat, None, chat_id, chat_guid, False
 
         total_count = rows[0][9] if rows else 0
         lines = []

@@ -508,7 +508,7 @@ def main():
             chat_guid = None
             if chat_filter:
                 print(f"{CLR_DIM}Searching iMessage history for '{chat_filter}'...{CLR_RESET}")
-                chat_history, message_count, resolved_chat_label, is_group_chat, chat_context, chat_id, chat_guid = load_recent_chat_history(chat_filter, args.history_limit)
+                chat_history, message_count, resolved_chat_label, is_group_chat, chat_context, chat_id, chat_guid, last_is_from_me = load_recent_chat_history(chat_filter, args.history_limit)
                 if chat_history:
                     label = resolved_chat_label or chat_filter
                     print(f"{CLR_PRE}✅ Loaded {message_count} messages from '{label}'{CLR_RESET}")
