@@ -179,9 +179,8 @@ def resolve_chat_matches(chat_filter: str, auto_select: bool = False) -> List[Tu
             print("❌ No matching chats found in iMessage database.")
         return []
 
-    # Sort primarily by fuzzy score, secondarily prioritize DMs (is_group=False first), 
-    # tertiarily by recency (last_msg_date)
-    matches.sort(key=lambda item: (item[0], not item[4], item[3]), reverse=True)
+    # Sort by fuzzy score, then by recency
+    matches.sort(key=lambda item: (item[0], item[3]), reverse=True)
 
     if not auto_select:
         print(f"✅ Found {len(matches)} potential chat matches.")
@@ -205,7 +204,8 @@ def _build_chat_label(chat_id: int, display_name: str, chat_identifier: str, han
     return ", ".join(h_list)
 
 def prompt_for_chat_suggestion(matches: List[Tuple[float, int, str, bool]]) -> Optional[Tuple[float, int, str, bool]]:
-    print(f"\n{'\033[1;33m'}Multiple potential chats found. Which one did you mean?{'\033[0m'}")
+    yellow, reset = "\033[1;33m", "\033[0m"
+    print(f"\n{yellow}Multiple potential chats found. Which one did you mean?{reset}")
     
     # Prioritize DMs in display but keep the sort order from resolve_chat_matches
     # DMs are shown with [DM] prefix, groups with [GROUP]
