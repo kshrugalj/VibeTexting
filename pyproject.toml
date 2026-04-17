@@ -8,7 +8,9 @@ version = "0.1.0"
 description = "AI-powered text response generator with personal style mimicry"
 readme = "README.md"
 requires-python = ">=3.8"
-dependencies = []
+dependencies = [
+    "prompt-toolkit>=3.0.0",
+]
 
 [project.scripts]
 vibetexting = "vibetexting.cli:main"

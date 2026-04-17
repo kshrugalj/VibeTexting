@@ -90,4 +90,11 @@ def merge_runtime_settings(args: argparse.Namespace, config: dict) -> argparse.N
         args.intent_mode = DEFAULT_INTENT_MODE
     if isinstance(recipient_config, dict) and recipient_config.get("intent_mode"):
         args.intent_mode = recipient_config.get("intent_mode")
+    if getattr(args, "delay", None) is None and config.get("delay") is not None:
+        try:
+            args.delay = int(config.get("delay"))
+        except (ValueError, TypeError):
+            args.delay = 0
+    elif getattr(args, "delay", None) is None:
+        args.delay = 0
     return args

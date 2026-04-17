@@ -28,6 +28,9 @@ from .prompts import (
 )
 from .llm import call_local_llm, list_ollama_models, list_lmstudio_models, start_lmstudio_server, stop_lmstudio_server
 from .utils import get_clipboard_text, send_imessage
+from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.formatted_text import HTML, ANSI
 
 # ANSI color codes for prettier CLI
 CLR_VIBE = "\033[1;35m"  # Bold Magenta
@@ -45,6 +48,7 @@ def print_help():
     print(f"  {CLR_PRE}/model [name]{CLR_RESET}  - Switch to a specific model")
     print(f"  {CLR_PRE}/models{CLR_RESET}       - List all available local models")
     print(f"  {CLR_PRE}/limit [num]{CLR_RESET}   - Change message history limit")
+    print(f"  {CLR_PRE}/delay [sec]{CLR_RESET}  - Set delay before auto-responding")
     print(f"  {CLR_PRE}/full{CLR_RESET}          - Use the WHOLE conversation as context")
     print(f"  {CLR_PRE}/goal [text]{CLR_RESET}   - Set a conversation goal (steers AI automatically)")
     print(f"  {CLR_PRE}/auto{CLR_RESET}           - Enter Auto-Pilot mode (monitors and replies automatically)")
@@ -94,12 +98,15 @@ def prompt_setup_config() -> dict:
     }
     return {key: value for key, value in config.items() if value is not None}
 
-def run_autopilot(args, config, chat_filter, vibe_content, goal):
+def run_autopilot(args, config, chat_filter, vibe_content, goal, session=None):
     """Monitors chat history and automatically replies to new messages."""
     print(f"\n{CLR_VIBE}--- 🤖 Auto-Pilot Mode Active ---{CLR_RESET}")
     if not goal:
         print(f"{CLR_ERR}No goal set!{CLR_RESET}")
-        goal = input(f"{CLR_USR}What is the goal for this autonomous conversation?{CLR_RESET} ").strip()
+        if session:
+            goal = session.prompt(ANSI(f"{CLR_USR}What is the goal for this autonomous conversation?{CLR_RESET} ")).strip()
+        else:
+            goal = input(f"{CLR_USR}What is the goal for this autonomous conversation?{CLR_RESET} ").strip()
         if not goal:
             print(f"{CLR_ERR}Goal required for Auto-Pilot. Returning to interactive mode.{CLR_RESET}")
             return goal
@@ -166,23 +173,43 @@ def run_autopilot(args, config, chat_filter, vibe_content, goal):
                     last_history = (current_history, current_count)
                     continue
 
-                last_line = lines[-1]
-                # New incoming message detected (or starting from an incoming message)
-                print(f"\n{CLR_USR}Last message from {label}:{CLR_RESET}")
-                print(f"{CLR_DIM}{last_line}{CLR_RESET}")
+                new_count = 1
+                if last_history is not None:
+                    new_count = current_count - last_history[1]
+                
+                # Make sure we don't try to extract more lines than we have
+                new_count = max(1, min(new_count, len(lines)))
+                new_lines = lines[-new_count:]
 
-                # Extract the message text from the last line (after the speaker label)
+                # New incoming message detected (or starting from an incoming message)
+                if new_count > 1:
+                    print(f"\n{CLR_USR}Last {new_count} messages from {label}:{CLR_RESET}")
+                else:
+                    print(f"\n{CLR_USR}Last message from {label}:{CLR_RESET}")
+                
+                for line in new_lines:
+                    print(f"{CLR_DIM}{line}{CLR_RESET}")
+
+                # Extract the message text from the new lines (after the speaker label)
                 # Format: [timestamp] Speaker: Text
-                try:
-                    original_msg = last_line.split(": ", 1)[1]
-                    print(f"{CLR_DIM}[DEBUG] Extracted message: {original_msg}{CLR_RESET}")
-                except IndexError:
-                    original_msg = last_line
-                    print(f"{CLR_DIM}[DEBUG] Using full line as message: {original_msg}{CLR_RESET}")
+                extracted_msgs = []
+                for line in new_lines:
+                    try:
+                        extracted_msgs.append(line.split(": ", 1)[1])
+                    except IndexError:
+                        extracted_msgs.append(line)
+                
+                original_msg = " ".join(extracted_msgs)
+                print(f"{CLR_DIM}[DEBUG] Extracted combined message: {original_msg}{CLR_RESET}")
 
                 print(f"{CLR_DIM}[DEBUG] Searching for relevant memories...{CLR_RESET}")
                 memories = search_relevant_history(chat_id, original_msg)
                 print(f"{CLR_DIM}[DEBUG] Memories found: {memories is not None}{CLR_RESET}")
+
+                delay_sec = getattr(args, 'delay', 0)
+                if delay_sec > 0:
+                    print(f"{CLR_DIM}Waiting {delay_sec} seconds before responding...{CLR_RESET}")
+                    time.sleep(delay_sec)
 
                 print(f"{CLR_DIM}Generating autonomous reply...{CLR_RESET}")
                 
@@ -244,6 +271,7 @@ def main():
     parser.add_argument("--vibe", help="Path to your vibe profile")
     parser.add_argument("--chat", help="Contact name or phone number")
     parser.add_argument("--history-limit", type=int, default=None, help="Max history messages")
+    parser.add_argument("--delay", type=int, default=None, help="Delay in seconds before auto-responding")
     parser.add_argument("--full", action="store_true", help="Use the entire chat history as context (warning: may exceed model limit)")
     parser.add_argument("--list-groups", action="store_true", help="List recent group chats and exit")
     args = parser.parse_args()
@@ -289,6 +317,14 @@ def main():
     goal = None
     autopilot_active = False
 
+    # Set up command completer for prompt-toolkit
+    commands = [
+        "/chat", "/groups", "/model", "/models", "/limit", "/delay", "/full",
+        "/goal", "/auto", "/vibe", "/paste", "/help", "exit", "quit"
+    ]
+    completer = WordCompleter(commands, ignore_case=True)
+    session = PromptSession(completer=completer)
+
     try:
         while True:
             # Skip vibe profile reload and user prompt during autopilot
@@ -310,9 +346,9 @@ def main():
                     clipboard = get_clipboard_text()
                     if clipboard:
                         print(f"\n{CLR_USR}Clipboard detected:{CLR_RESET} \"{clipboard[:60]}{'...' if len(clipboard)>60 else ''}\"")
-                        choice = input(f"Use this text? (Y/n/command): ").strip().lower()
+                        choice = session.prompt(ANSI(f"Use this text? (Y/n/command): ")).strip().lower()
                         if choice == 'n':
-                            original = input(f"{CLR_PRE}vibetext{CLR_RESET}> ").strip()
+                            original = session.prompt(ANSI(f"{CLR_PRE}vibetext{CLR_RESET}> ")).strip()
                         elif choice != '' and choice != 'y' and choice.startswith('/'):
                             original = choice
                         elif choice != '' and choice != 'y':
@@ -320,11 +356,11 @@ def main():
                         else:
                             original = clipboard
                     else:
-                        original = input(f"{CLR_PRE}vibetext{CLR_RESET}> ").strip()
+                        original = session.prompt(ANSI(f"{CLR_PRE}vibetext{CLR_RESET}> ")).strip()
                 else:
                     prompt_label = f" ({chat_filter})" if chat_filter else ""
                     print(f"{CLR_DIM}[DEBUG] Prompting with label: {prompt_label}{CLR_RESET}")
-                    original = input(f"{CLR_PRE}vibetext{prompt_label}{CLR_RESET}> ").strip()
+                    original = session.prompt(ANSI(f"{CLR_PRE}vibetext{prompt_label}{CLR_RESET}> ")).strip()
                 
                 print(f"{CLR_DIM}[DEBUG] User input received: {original[:50]}...{CLR_RESET}")
 
@@ -347,7 +383,7 @@ def main():
                 parts = original.split(maxsplit=1)
                 new_goal = parts[1] if len(parts) > 1 else ""
                 if not new_goal:
-                    new_goal = input("\nEnter conversation goal (or 'clear' to remove): ").strip()
+                    new_goal = session.prompt(ANSI("\nEnter conversation goal (or 'clear' to remove): ")).strip()
 
                 if new_goal.lower() == 'clear':
                     goal = None
@@ -362,7 +398,7 @@ def main():
                 print(f"\n{CLR_DIM}[DEBUG] /auto command triggered{CLR_RESET}")
                 if not chat_filter:
                     print(f"{CLR_DIM}[DEBUG] No chat_filter set, prompting for recipient{CLR_RESET}")
-                    chat_filter = input(f"\n{CLR_USR}Who are you texting?{CLR_RESET} ").strip() or None
+                    chat_filter = session.prompt(ANSI(f"\n{CLR_USR}Who are you texting?{CLR_RESET} ")).strip() or None
                     print(f"{CLR_DIM}[DEBUG] User entered chat_filter: {chat_filter}{CLR_RESET}")
                 else:
                     print(f"{CLR_DIM}[DEBUG] Using existing chat_filter: {chat_filter}{CLR_RESET}")
@@ -371,7 +407,7 @@ def main():
                     print(f"{CLR_DIM}[DEBUG] Starting autopilot with chat_filter: {chat_filter}{CLR_RESET}")
                     autopilot_active = True
                     try:
-                        goal = run_autopilot(args, config, chat_filter, vibe_content, goal)
+                        goal = run_autopilot(args, config, chat_filter, vibe_content, goal, session=session)
                         print(f"{CLR_DIM}[DEBUG] Autopilot returned, goal: {goal}{CLR_RESET}")
                     finally:
                         autopilot_active = False
@@ -404,7 +440,7 @@ def main():
                 parts = original.split(maxsplit=1)
                 new_model = parts[1] if len(parts) > 1 else ""
                 if not new_model:
-                    new_model = input("\nEnter new model name: ").strip()
+                    new_model = session.prompt(ANSI("\nEnter new model name: ")).strip()
                 if new_model:
                     args.model = new_model
                     config['model'] = new_model
@@ -417,7 +453,7 @@ def main():
                 parts = original.split(maxsplit=1)
                 new_limit = parts[1] if len(parts) > 1 else ""
                 if not new_limit:
-                    new_limit = input(f"Enter history limit (current: {args.history_limit}): ").strip()
+                    new_limit = session.prompt(ANSI(f"Enter history limit (current: {args.history_limit}): ")).strip()
                 if new_limit:
                     try:
                         limit_val = int(new_limit)
@@ -425,6 +461,24 @@ def main():
                         config['history_limit'] = limit_val
                         save_user_config(config)
                         print(f"{CLR_PRE}✅ History limit set to {limit_val}{CLR_RESET}")
+                    except ValueError:
+                        print(f"{CLR_ERR}Invalid number.{CLR_RESET}")
+                first_run = False
+                continue
+
+            if cmd.startswith('/delay'):
+                parts = original.split(maxsplit=1)
+                new_delay = parts[1] if len(parts) > 1 else ""
+                current_delay = getattr(args, 'delay', 0)
+                if not new_delay:
+                    new_delay = session.prompt(ANSI(f"Enter delay before auto-responding in seconds (current: {current_delay}): ")).strip()
+                if new_delay:
+                    try:
+                        delay_val = int(new_delay)
+                        args.delay = delay_val
+                        config['delay'] = delay_val
+                        save_user_config(config)
+                        print(f"{CLR_PRE}✅ Auto-response delay set to {delay_val} seconds{CLR_RESET}")
                     except ValueError:
                         print(f"{CLR_ERR}Invalid number.{CLR_RESET}")
                 first_run = False
@@ -443,7 +497,7 @@ def main():
                 parts = original.split(maxsplit=1)
                 new_vibe = parts[1] if len(parts) > 1 else ""
                 if not new_vibe:
-                    new_vibe = input("Enter vibe profile path: ").strip()
+                    new_vibe = session.prompt(ANSI("Enter vibe profile path: ")).strip()
                 if new_vibe:
                     if os.path.exists(new_vibe):
                         args.vibe = new_vibe
@@ -468,7 +522,7 @@ def main():
             if cmd.startswith('/chat'):
                 new_chat = original[5:].strip()
                 if not new_chat:
-                    chat_filter = input("\nWho are you texting? ").strip() or None
+                    chat_filter = session.prompt(ANSI("\nWho are you texting? ")).strip() or None
                 else:
                     chat_filter = new_chat
                 print(f"{CLR_PRE}✅ Recipient switched to '{chat_filter}'{CLR_RESET}")
@@ -483,7 +537,7 @@ def main():
                 print(f"\n{CLR_BOLD}Recent group chats:{CLR_RESET}")
                 for idx, group in enumerate(groups, start=1):
                     print(f"  {idx}. {group['label']} ({group['participant_count']} participants)")
-                selection = input("Pick a number: ").strip()
+                selection = session.prompt(ANSI("Pick a number: ")).strip()
                 if selection:
                     try:
                         selected_idx = int(selection)
@@ -499,7 +553,7 @@ def main():
 
             # If it's not a command, process as a message
             if not chat_filter:
-                chat_filter = input(f"\n{CLR_USR}Who are you texting?{CLR_RESET} (Enter to skip history): ").strip() or None
+                chat_filter = session.prompt(ANSI(f"\n{CLR_USR}Who are you texting?{CLR_RESET} (Enter to skip history): ")).strip() or None
 
             chat_history = None
             resolved_chat_label = None
@@ -575,6 +629,9 @@ def main():
 
             print()
 
+    except KeyboardInterrupt:
+        if not started_server:
+            print(f"\n{CLR_PRE}✅ Server stopped.{CLR_RESET}")
     finally:
         # Stop the Gemma server if we started it
         if started_server:

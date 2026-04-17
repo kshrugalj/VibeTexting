@@ -85,7 +85,10 @@ def call_ollama(prompt: str, model: str = "llama3") -> str:
         "prompt": prompt, 
         "stream": False,
         "options": {
-            "num_ctx": 8192
+            "num_ctx": 8192,
+            "temperature": 0.6,
+            "frequency_penalty": 1.2,
+            "presence_penalty": 0.5
         }
     }
     try:
@@ -128,7 +131,9 @@ def call_lmstudio(prompt: str, model: str) -> str:
     payload = {
         "model": model,
         "messages": messages,
-        "temperature": 0.7,
+        "temperature": 0.6,
+        "frequency_penalty": 1.2,
+        "presence_penalty": 0.5,
     }
     try:
         body = _post_json(api_url, payload, timeout=LM_STUDIO_TIMEOUT)

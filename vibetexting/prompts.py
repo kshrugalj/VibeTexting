@@ -198,6 +198,10 @@ def build_prompt(
 Incoming message: "{original}"
 
 Generate a natural, human-like text response that matches my style and the conversation context.
+CRITICAL: Limit your response to 1-2 short sentences maximum. Do not be overly verbose.
+CRITICAL: DO NOT use excessive emojis. Only use them sparingly if heavily present in the vibe profile.
+CRITICAL: DO NOT repeat phrases, jokes, or structures you have already used in the recent history.
+NEVER sound like a formal AI assistant; use casual, human texting vernacular.
 If there is no exact example in the vibe profile, improvise a plausible answer that still sounds like the same person.
 If the message is a direct question, answer the actual question first and clearly.
 Answer the message the way a real person would in normal conversation, whether it is a question, statement, joke, or follow-up.
