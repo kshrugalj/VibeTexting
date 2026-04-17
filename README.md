@@ -1,50 +1,26 @@
 # VibeTexting CLI 🎤
 
-A powerful, 100% local AI tool to help you respond to text messages faster using style-matched response generation. VibeTexting learns your unique texting "vibe" from your iMessage history and drafts replies that sound exactly like you.
+A powerful, 100% local AI tool to help you respond to text messages faster and more authentically. VibeTexting learns your unique texting "vibe" from your iMessage history and autonomously drafts replies that sound exactly like you. 
 
-## New Features (v0.1.0)
+## Features
 
-- 🤖 **Auto-Pilot Mode** - Automatically monitors a specific chat and sends replies based on your style and goals.
-- 🎯 **Conversation Goals** - Set a specific objective (e.g., "Ask them to hang out this weekend") and the AI will steer the conversation towards it.
-- 🧠 **Smart Memories (RAG)** - Automatically retrieves relevant past context from your message history to provide more accurate and personalized replies.
-- ⚡ **Gemma Auto-Start** - Automatically manages LM Studio servers for Gemma models via the `lms` CLI.
-- 👥 **Group Chat Aware** - Full support for group threads with participant-aware history and context.
-
-## Core Features
-
-- 🏠 **Truly Local AI** - Powered by [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai) to run everything on your machine.
-- 🎭 **Personal Vibe Mimicry** - Extracts your iMessage style to sound like *you*.
-- 🎨 **Personal Style Matching** - Uses your sent messages as few-shot examples.
-- 📋 **Clipboard Integration** - Auto-detect messages from your clipboard.
-- 🧵 **Chat History Context** - Loads iMessage conversations with Contacts.app fallback for names.
-- 🛠️ **Developer Friendly** - Easy to install and extend.
-
-## Project Structure
-
-```
-VibeTexting/
-├── vibetexting/             # Core package
-│   ├── cli.py               # Main CLI entry point
-│   ├── llm.py               # Backend integration (Ollama/LM Studio)
-│   ├── database.py          # iMessage/SQLite integration & Memories
-│   ├── prompts.py           # Intelligent prompt engineering
-│   └── ...
-├── vibetext.py              # Convenient wrapper script
-├── extract_imessage_vibe.py  # Mac-only script to learn your style
-├── pyproject.toml           # Python package configuration
-└── README.md
-```
+- 🏠 **Truly Local AI** - Powered by [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai). Run everything entirely on your own machine for complete privacy.
+- 🤖 **Auto-Pilot Mode** - Let the AI take the wheel. VibeTexting can monitor specific chats, read incoming messages, wait a natural delay, and automatically send conversational replies.
+- 🎭 **Personal Vibe Mimicry** - Uses your actual sent iMessages as few-shot training examples to match your vocabulary, capitalization, and punctuation habits.
+- 🧠 **Smart Memories & Context** - Automatically retrieves relevant past context from your SQLite message history and groups multiple incoming unread messages together to provide accurate, context-aware replies.
+- 🎯 **Conversation Goals** - Set a specific objective (e.g., "Ask them to hang out this weekend"), and the AI will naturally steer the conversation toward it.
+- ⚡ **Interactive CLI** - Built with `prompt-toolkit` for a rich, colorized terminal experience complete with slash-command autocompletion dropdowns.
+- 👥 **Group Chat Aware** - Full support for group threads, attributing messages to the correct participants.
+- ⏱️ **Configurable Delays** - Set a custom delay before auto-responding to simulate natural typing speeds and avoid looking like a bot.
 
 ## Installation
 
-### 1. Install Prerequisites
+### 1. Prerequisites
 
-1.  **Ollama**: Download and install from [ollama.com](https://ollama.com).
-2.  **Pull a Model**: By default, VibeTexting uses `llama3`.
-    ```bash
-    ollama pull llama3
-    ```
-3.  **Optional: LM Studio**: If using LM Studio, install the `lms` CLI for automatic server management.
+1.  **macOS**: VibeTexting relies on Apple's `chat.db` (iMessage) and AppleScript to read and send messages.
+2.  **Ollama** or **LM Studio**:
+    - [Download Ollama](https://ollama.com) and pull a model (e.g., `ollama pull llama3`).
+    - Or use LM Studio and start the Local Inference Server (default port: 1234).
 
 ### 2. Install VibeTexting
 
@@ -53,85 +29,97 @@ VibeTexting/
 git clone https://github.com/kshrugalj/VibeTexting.git
 cd VibeTexting
 
-# Install as a local package
+# Install the package locally
 pip install -e .
 ```
 
+*Note: You will be prompted by macOS to grant "Full Disk Access" to your Terminal (or IDE) to allow VibeTexting to read your iMessage `chat.db` database.*
+
 ## Quick Start
 
-### 1. Run the CLI
+### 1. Extract Your Vibe Profile
 
-Start the generator by simply running:
+Before generating responses, you need to teach the AI how you text. Run the extraction script to sample your recent sent messages:
+
 ```bash
-vibetexting
+vibe-extract
 ```
 
-### 1a. Set Up Your Defaults
+This creates a `my_vibe_profile.txt` file containing your unique style. 
 
-Run the setup command once to create your saved user profile:
+*Pro Tip: If you've used Auto-Pilot recently and don't want the AI to train on its own generated messages, use the cutoff flag:* `vibe-extract --cutoff-date 2026-04-01`.
+
+### 2. Setup Default Configuration
+
+Run the setup wizard to configure your preferred LLM backend and default vibe profile:
 
 ```bash
 vibetexting --setup
 ```
 
-This writes `~/.vibetexting.json` and stores your name, vibe file, and optional default recipient mapping.
+This saves your preferences to `~/.vibetexting.json`.
 
-### 2. Training on Your Style (Mac Only)
+### 3. Run the CLI
 
-1. Run the extraction script:
-   ```bash
-   vibe-extract
-   ```
-2. **Note:** You will be prompted to grant "Full Disk Access" to Terminal (or your IDE) in *System Settings > Privacy & Security > Full Disk Access*.
-3. The script creates `my_vibe_profile.txt` (your style) and `my_chat_history.txt` (recent context).
+Start the interactive generator:
 
-**💡 Pro Tip: Excluding AI Messages**
-If you've been using Auto-Pilot, your iMessage history will contain messages written by the AI. To ensure you only train on *your* real messages, use the cutoff flag:
 ```bash
-vibe-extract --cutoff-date 2024-01-01
+vibetexting
 ```
-This ensures your "vibe" profile stays authentic to your actual writing style.
 
 ## Interactive Commands
 
-Once inside the `vibetexting` CLI, you can use several slash-commands:
+Inside the `vibetexting` CLI, type `/` to open the autocompletion menu and access these commands:
 
 | Command | Description |
 |----------|-------------|
-| `/chat [name]` | Switch recipient and load their history. |
-| `/groups` | List and switch to recent group chats. |
-| `/auto` | **Enter Auto-Pilot mode** (monitors and replies automatically). |
-| `/goal [text]` | Set a conversation goal (steers AI automatically). |
-| `/models` | List all available local models (Ollama & LM Studio). |
-| `/model [name]` | Switch to a specific model on the fly. |
-| `/limit [num]` | Change message history context limit. |
-| `/full` | Use the WHOLE conversation as context. |
-| `/vibe [path]` | Switch to a different vibe profile file. |
-| `/paste` | Use text from clipboard as the message to reply to. |
+| `/chat [name]` | Switch recipient and load their iMessage history. |
+| `/groups` | List and switch to recent active group chats. |
+| `/auto` | **Enter Auto-Pilot mode** to automatically monitor the chat and reply. |
+| `/delay [sec]` | Set a delay (in seconds) before Auto-Pilot sends a reply. |
+| `/goal [text]` | Set a conversation goal for the AI to steer toward. |
+| `/models` | List all available local models from Ollama & LM Studio. |
+| `/model [name]` | Switch to a specific LLM on the fly. |
+| `/limit [num]` | Change how many past messages are loaded into the AI's context. |
+| `/full` | Use the WHOLE conversation as context (Warning: May exceed context limits). |
+| `/vibe [path]` | Switch to a different vibe profile text file. |
+| `/paste` | Manually paste text from your clipboard to generate a reply for. |
 | `/help` | Show the help menu. |
 | `exit` / `quit` | Exit VibeTexting. |
 
-## Auto-Pilot & Goals
+## How Auto-Pilot Works
 
-Auto-Pilot (`/auto`) allows VibeTexting to run in the background. It polls your iMessage database every 5 seconds for new incoming messages and automatically drafts and sends a reply.
+When you run `/auto`, VibeTexting runs a background polling loop checking your iMessage database every 5 seconds. 
 
-You can combine this with `/goal` to have the AI autonomously navigate a conversation toward a specific outcome without you needing to manually prompt it for every message.
+1. **Detection:** It detects new incoming messages. If a user sends 3 texts in a row, VibeTexting groups them together so the AI responds to the complete thought.
+2. **Delay:** It waits for your configured `/delay` time.
+3. **Prompt Generation:** It builds a strict, optimized prompt combining your vibe profile, chat history, conversation goal, and memory context. It applies strict penalties (`frequency_penalty`, `presence_penalty`) to prevent repetitive phrasing and unnatural emoji spam.
+4. **Sending:** It automatically sends the AI-generated reply directly through the macOS Messages app using AppleScript.
 
-## How it Works
+## Project Structure
 
-1. **Input Detection:** Automatically pulls the last text from your clipboard or monitors iMessage in Auto-Pilot.
-2. **Chat Lookup:** Intelligent matching for contact names, phone numbers, or group thread titles.
-3. **Context Retrieval (Memories):** Searches your past messages for keywords in the current message to provide the AI with relevant historical context ("What did we talk about last time?").
-4. **Intent Check:** For complex messages, it pauses to ask for your intent or raw facts (in `suggest` mode) before drafting.
-5. **Vibe Mimicry:** Uses "Few-Shot Prompting" with your extracted style to ensure the reply sounds authentic.
-6. **Output:** In manual mode, it copies the reply to your clipboard. In Auto-Pilot, it sends it automatically via AppleScript.
+```
+VibeTexting/
+├── vibetexting/             # Core package
+│   ├── cli.py               # Main CLI loop & Auto-Pilot logic
+│   ├── llm.py               # API integrations for Ollama/LM Studio
+│   ├── database.py          # iMessage SQLite extraction & Memories mapping
+│   ├── prompts.py           # Intelligent prompt engineering & constraints
+│   ├── config.py            # User configuration management
+│   └── utils.py             # AppleScript sending & clipboard helpers
+├── extract_imessage_vibe.py # Few-shot extraction script
+├── pyproject.toml           # Build configuration & dependencies
+└── README.md
+```
 
 ## Contributing
 
-Feel free to open issues or submit PRs! Current roadmap includes:
-- [ ] Improved RAG with vector embeddings.
-- [ ] Support for image/mms attachments.
-- [ ] Web-based UI.
+Contributions, issues, and feature requests are welcome! 
+
+Current Roadmap:
+- [ ] Improved RAG with vector embeddings for memories.
+- [ ] Support for parsing and describing image/MMS attachments in context.
+- [ ] Web-based UI dashboard.
 
 ## License
 
