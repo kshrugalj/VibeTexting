@@ -98,7 +98,11 @@ def prompt_setup_config() -> dict:
     }
     return {key: value for key, value in config.items() if value is not None}
 
+<<<<<<< HEAD
 def run_autopilot(args, config, chat_filter, vibe_content, goal, session=None):
+=======
+def run_autopilot(args, config, chat_filter, vibe_content, goal, pinned_chat_id=None):
+>>>>>>> f13d365e078a503f0cfc37755286c549945b3688
     """Monitors chat history and automatically replies to new messages."""
     print(f"\n{CLR_VIBE}--- 🤖 Auto-Pilot Mode Active ---{CLR_RESET}")
     if not goal:
@@ -122,57 +126,46 @@ def run_autopilot(args, config, chat_filter, vibe_content, goal, session=None):
     print(f"{CLR_DIM}[DEBUG]   model: {args.model or 'llama3'}{CLR_RESET}")
     print(f"{CLR_DIM}[DEBUG]   backend: {args.backend or 'auto'}{CLR_RESET}\n")
 
-    # Initialize last_history to None so the first poll iteration can process the current state
-    # This allows it to "carry on the conversation" from the last existing message.
-    _, initial_count, resolved_label, is_group_chat, chat_context, chat_id, chat_guid, last_is_from_me = load_recent_chat_history(chat_filter, 1, auto_select=True)
-    last_history = None
+    last_history, last_count, resolved_label, is_group_chat, chat_context, chat_id, chat_guid, _ = load_recent_chat_history(chat_filter, 1, auto_select=True, chat_id=pinned_chat_id)
     
-    if not chat_id:
-        print(f"{CLR_ERR}Could not resolve chat for Auto-Pilot monitoring.{CLR_RESET}")
-        return goal
-
-    print(f"{CLR_DIM}[DEBUG] Auto-Pilot Monitoring:{CLR_RESET}")
-    print(f"{CLR_DIM}[DEBUG]   Recipient: {resolved_label} (ID: {chat_id}){CLR_RESET}")
-    
-    if initial_count == 0:
-        print(f"{CLR_ERR}⚠️ No messages found in this chat. If you are on restricted WiFi, iMessage may not be syncing to this Mac.{CLR_RESET}")
-        print(f"{CLR_DIM}Check if new messages are appearing in your macOS Messages app.{CLR_RESET}")
-    else:
-        status = f"Last message from {resolved_label}." if not last_is_from_me else "Last message from you."
-        print(f"{CLR_PRE}✅ Ready. {status}{CLR_RESET}")
-    print()
+    # Debug: Log initial history load
+    print(f"{CLR_DIM}[DEBUG] Initial history loaded:{CLR_RESET}")
+    print(f"{CLR_DIM}[DEBUG]   last_count: {last_count}{CLR_RESET}")
+    print(f"{CLR_DIM}[DEBUG]   resolved_label: {resolved_label}{CLR_RESET}")
+    print(f"{CLR_DIM}[DEBUG]   is_group_chat: {is_group_chat}{CLR_RESET}")
+    print(f"{CLR_DIM}[DEBUG]   chat_id: {chat_id}{CLR_RESET}")
+    print(f"{CLR_DIM}[DEBUG]   chat_guid: {chat_guid}{CLR_RESET}")
+    print(f"{CLR_DIM}[DEBUG]   history length: {len(last_history) if last_history else 0} chars{CLR_RESET}\n")
 
     iteration = 0
     try:
         while True:
             iteration += 1
-            # Poll every 5 seconds
-            if iteration > 1:
-                time.sleep(5)
+            print(f"\n{CLR_DIM}[DEBUG] === Polling iteration #{iteration} ==={CLR_RESET}")
+            time.sleep(5) # Poll every 5 seconds
             
-            # Use fixed chat_id for polling to avoid re-resolution issues
-            current_history, current_count, _, _, _, _, _, current_is_from_me = load_recent_chat_history(resolved_label, 1, auto_select=True, chat_id=chat_id)
+            print(f"{CLR_DIM}[DEBUG] Loading current history with filter: '{chat_filter}'{CLR_RESET}")
+            current_history, current_count, _, _, _, _, current_chat_guid, _ = load_recent_chat_history(chat_filter, 1, auto_select=True, chat_id=pinned_chat_id)
+            print(f"{CLR_DIM}[DEBUG] Current history length: {len(current_history) if current_history else 0} chars, count: {current_count}{CLR_RESET}")
 
-            # If this is the first poll or history has changed (either text or count)
-            if (current_history, current_count) != last_history:
-                if last_history is not None:
-                    print(f"\n{CLR_VIBE}🔔 New activity detected! (Total: {current_count}){CLR_RESET}")
+            # If the last message in history has changed and it's not from us
+            if current_history != last_history:
+                print(f"{CLR_DIM}[DEBUG] History changed! Old length: {len(last_history) if last_history else 0}, New length: {len(current_history) if current_history else 0}{CLR_RESET}")
                 
                 # Get the actual last message content to see who sent it
-                history_full, count, label, is_group, context, cid, cguid, is_from_me_latest = load_recent_chat_history(resolved_label, args.history_limit or 20, auto_select=True, chat_id=chat_id)
+                # We reload with a small limit to inspect the latest
+                history_full, count, label, is_group, context, cid, cguid, _ = load_recent_chat_history(chat_filter, args.history_limit or 20, auto_select=True, chat_id=pinned_chat_id)
 
+                # Debug: Log the full history
+                print(f"{CLR_DIM}[DEBUG] Reloaded history_full length: {len(history_full) if history_full else 0} chars{CLR_RESET}")
+                
+                # Check if the very last line starts with "Me:"
                 lines = history_full.strip().split("\n")
                 if not lines:
-                    last_history = (current_history, current_count)
+                    print(f"{CLR_DIM}[DEBUG] No lines in history, skipping{CLR_RESET}")
                     continue
 
-                if is_from_me_latest:
-                    # We sent this message. Skip replying but update last_history.
-                    if last_history is not None:
-                        print(f"{CLR_DIM}Last message is from you. Monitoring for a reply...{CLR_RESET}")
-                    last_history = (current_history, current_count)
-                    continue
-
+<<<<<<< HEAD
                 new_count = 1
                 if last_history is not None:
                     new_count = current_count - last_history[1]
@@ -180,6 +173,20 @@ def run_autopilot(args, config, chat_filter, vibe_content, goal, session=None):
                 # Make sure we don't try to extract more lines than we have
                 new_count = max(1, min(new_count, len(lines)))
                 new_lines = lines[-new_count:]
+=======
+                last_line = lines[-1]
+                print(f"{CLR_DIM}[DEBUG] Last line: {last_line}{CLR_RESET}")
+                
+                if "]: Me: " in last_line:
+                    # We sent this message, or at least the last message is ours. Skip.
+                    print(f"{CLR_DIM}[DEBUG] Last message is from us, skipping{CLR_RESET}")
+                    last_history = current_history
+                    continue
+
+                # New incoming message detected!
+                print(f"\n{CLR_USR}New message detected:{CLR_RESET}")
+                print(f"{CLR_DIM}{last_line}{CLR_RESET}")
+>>>>>>> f13d365e078a503f0cfc37755286c549945b3688
 
                 # New incoming message detected (or starting from an incoming message)
                 if new_count > 1:
@@ -253,9 +260,9 @@ def run_autopilot(args, config, chat_filter, vibe_content, goal, session=None):
                 else:
                     print(f"{CLR_ERR}LLM Error: {reply}{CLR_RESET}")
 
-                last_history = (current_history, current_count)
+                last_history = current_history
             else:
-                pass
+                print(f"{CLR_DIM}[DEBUG] No history change, continuing...{CLR_RESET}")
     except KeyboardInterrupt:
         print(f"\n{CLR_VIBE}--- Auto-Pilot Deactivated ---{CLR_RESET}")
         return goal
@@ -313,6 +320,7 @@ def main():
             print(f"{CLR_ERR}⚠️ Could not auto-start Gemma server. Please start LM Studio manually.{CLR_RESET}")
 
     chat_filter = args.chat
+    pinned_chat_id = None
     first_run = True
     goal = None
     autopilot_active = False
@@ -407,7 +415,7 @@ def main():
                     print(f"{CLR_DIM}[DEBUG] Starting autopilot with chat_filter: {chat_filter}{CLR_RESET}")
                     autopilot_active = True
                     try:
-                        goal = run_autopilot(args, config, chat_filter, vibe_content, goal, session=session)
+                        goal = run_autopilot(args, config, chat_filter, vibe_content, goal, session=session, pinned_chat_id=pinned_chat_id)
                         print(f"{CLR_DIM}[DEBUG] Autopilot returned, goal: {goal}{CLR_RESET}")
                     finally:
                         autopilot_active = False
@@ -525,6 +533,7 @@ def main():
                     chat_filter = session.prompt(ANSI("\nWho are you texting? ")).strip() or None
                 else:
                     chat_filter = new_chat
+                pinned_chat_id = None
                 print(f"{CLR_PRE}✅ Recipient switched to '{chat_filter}'{CLR_RESET}")
                 first_run = False
                 continue
@@ -542,7 +551,9 @@ def main():
                     try:
                         selected_idx = int(selection)
                         if 1 <= selected_idx <= len(groups):
-                            chat_filter = groups[selected_idx - 1]["label"]
+                            selected_group = groups[selected_idx - 1]
+                            chat_filter = selected_group["label"]
+                            pinned_chat_id = selected_group["chat_id"]
                             print(f"{CLR_PRE}✅ Recipient switched to '{chat_filter}'{CLR_RESET}")
                         else:
                             print(f"{CLR_ERR}Invalid selection.{CLR_RESET}")
@@ -562,7 +573,7 @@ def main():
             chat_guid = None
             if chat_filter:
                 print(f"{CLR_DIM}Searching iMessage history for '{chat_filter}'...{CLR_RESET}")
-                chat_history, message_count, resolved_chat_label, is_group_chat, chat_context, chat_id, chat_guid, last_is_from_me = load_recent_chat_history(chat_filter, args.history_limit)
+                chat_history, message_count, resolved_chat_label, is_group_chat, chat_context, chat_id, chat_guid, _ = load_recent_chat_history(chat_filter, args.history_limit, chat_id=pinned_chat_id)
                 if chat_history:
                     label = resolved_chat_label or chat_filter
                     print(f"{CLR_PRE}✅ Loaded {message_count} messages from '{label}'{CLR_RESET}")
@@ -635,6 +646,12 @@ def main():
     finally:
         # Stop the Gemma server if we started it
         if started_server:
+            print(f"\n{CLR_DIM}Stopping Gemma server...{CLR_RESET}")
+            stop_lmstudio_server()
+            print(f"{CLR_PRE}✅ Server stopped.{CLR_RESET}")
+
+if __name__ == "__main__":
+    main()
             print(f"\n{CLR_DIM}Stopping Gemma server...{CLR_RESET}")
             stop_lmstudio_server()
             print(f"{CLR_PRE}✅ Server stopped.{CLR_RESET}")
