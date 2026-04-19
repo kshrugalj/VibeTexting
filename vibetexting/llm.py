@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import time
+from typing import Optional, List
 from urllib import error, request
 
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
@@ -20,31 +21,41 @@ def is_lmstudio_running() -> bool:
     except Exception:
         return False
 
-def start_lmstudio_server() -> bool:
-    """Start LM Studio server if not already running."""
-    if is_lmstudio_running():
-        return True
-    
-    try:
-        global _lmstudio_process
-        # Start LM Studio in headless server mode
-        # Using lms command-line interface if available
-        _lmstudio_process = subprocess.Popen(
-            ["lms", "server", "start", "-p", "1234"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-        # Wait for server to be ready
-        for _ in range(30):  # Wait up to 30 seconds
-            time.sleep(1)
-            if is_lmstudio_running():
-                return True
-        return False
-    except FileNotFoundError:
-        # lms CLI not available, try alternative startup
-        return False
-    except Exception:
-        return False
+def start_lmstudio_server(model_to_load: Optional[str] = None) -> bool:
+    """Start LM Studio server if not already running, and optionally load a model."""
+    if not is_lmstudio_running():
+        try:
+            global _lmstudio_process
+            # Start LM Studio in headless server mode
+            _lmstudio_process = subprocess.Popen(
+                ["lms", "server", "start", "-p", "1234"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            # Wait for server to be ready
+            for _ in range(15):  # Wait up to 15 seconds
+                time.sleep(1)
+                if is_lmstudio_running():
+                    break
+        except Exception:
+            pass
+
+    if is_lmstudio_running() and model_to_load:
+        # Check if requested model (or similar) is already loaded
+        loaded_models = list_lmstudio_models()
+        if model_to_load not in loaded_models:
+            # Try to find the full identifier from installed models and load it
+            try:
+                result = subprocess.run(["lms", "ls"], capture_output=True, text=True)
+                for line in result.stdout.split('\n'):
+                    if model_to_load.lower() in line.lower():
+                        full_id = line.split()[0]
+                        print(f"Auto-loading model in LM Studio: {full_id}...")
+                        subprocess.run(["lms", "load", full_id], stdout=subprocess.DEVNULL)
+                        break
+            except Exception:
+                pass
+    return is_lmstudio_running()
 
 def stop_lmstudio_server() -> bool:
     """Stop LM Studio server if we started it."""
@@ -170,13 +181,38 @@ def list_lmstudio_models() -> list[str]:
 
 def call_local_llm(prompt: str, model: str = "llama3", backend: str = "auto") -> str:
     backend = (backend or "auto").lower()
+    model_lower = (model or "").lower()
+
+    # Smart Matching: If user says 'gemma', find the full ID (e.g., google/gemma-4-e4b)
+    if "gemma" in model_lower and "google" not in model_lower:
+        lms_models = list_lmstudio_models() # Check currently loaded
+        found = False
+        for m in lms_models:
+            if "gemma" in m.lower():
+                model = m
+                found = True
+                break
+        
+        if not found:
+            # Check if it's installed but not loaded
+            try:
+                result = subprocess.run(["lms", "ls"], capture_output=True, text=True)
+                for line in result.stdout.split('\n'):
+                    if "gemma" in line.lower():
+                        model = line.split()[0]
+                        break
+            except Exception:
+                pass
+
     if backend == "ollama":
         return call_ollama(prompt, model)
     if backend == "lmstudio":
+        start_lmstudio_server(model) # Auto-load if needed
         return call_lmstudio(prompt, model)
 
     # auto: prefer LM Studio for Gemma-family models, otherwise Ollama
-    if "gemma" in (model or "").lower():
+    if "gemma" in model.lower():
+        start_lmstudio_server(model)
         reply = call_lmstudio(prompt, model)
         if not reply.startswith("Error"):
             return reply
@@ -186,5 +222,7 @@ def call_local_llm(prompt: str, model: str = "llama3", backend: str = "auto") ->
     reply = call_ollama(prompt, model)
     if not reply.startswith("Error"):
         return reply
+    
+    start_lmstudio_server(model)
     fallback = call_lmstudio(prompt, model)
     return fallback if not fallback.startswith("Error") else f"{reply}\n\n{fallback}"
