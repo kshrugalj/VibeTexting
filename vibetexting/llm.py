@@ -23,20 +23,27 @@ def is_lmstudio_running() -> bool:
 
 def start_lmstudio_server(model_to_load: Optional[str] = None) -> bool:
     """Start LM Studio server if not already running, and optionally load a model."""
+    global _lmstudio_process
     if not is_lmstudio_running():
         try:
-            global _lmstudio_process
-            # Start LM Studio in headless server mode
-            _lmstudio_process = subprocess.Popen(
-                ["lms", "server", "start", "-p", "1234"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            # Wait for server to be ready
-            for _ in range(15):  # Wait up to 15 seconds
-                time.sleep(1)
-                if is_lmstudio_running():
-                    break
+            # If we think we have a process but it's actually dead, clean up
+            if _lmstudio_process is not None and _lmstudio_process.poll() is not None:
+                _lmstudio_process = None
+
+            if _lmstudio_process is None:
+                # Start LM Studio in headless server mode
+                # Note: 'lms' should be in the user's PATH. 
+                # We use a list to avoid shell=True security risks.
+                _lmstudio_process = subprocess.Popen(
+                    ["lms", "server", "start", "-p", "1234"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                # Wait for server to be ready
+                for _ in range(15):  # Wait up to 15 seconds
+                    time.sleep(1)
+                    if is_lmstudio_running():
+                        break
         except Exception:
             pass
 
