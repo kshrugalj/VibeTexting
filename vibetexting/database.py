@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import List, Tuple, Optional, Dict
 from .config import get_chat_db_path, normalize_chat_key
 from .contacts import resolve_contacts_aliases
+from .vision import describe_image
 
 # --- RAG 2.0: Semantic Memory Initialization ---
 try:
@@ -442,7 +443,8 @@ def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None, auto
                 m.cache_has_attachments,
                 m.balloon_bundle_id,
                 m.associated_message_type,
-                (SELECT COUNT(*) FROM message m2 JOIN chat_message_join cmj2 ON m2.ROWID = cmj2.message_id WHERE cmj2.chat_id = ?) as total_count
+                (SELECT COUNT(*) FROM message m2 JOIN chat_message_join cmj2 ON m2.ROWID = cmj2.message_id WHERE cmj2.chat_id = ?) as total_count,
+                (SELECT a.filename FROM attachment a JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id WHERE maj.message_id = m.ROWID AND (a.mime_type LIKE 'image/%' OR a.uti LIKE 'public.image' OR a.filename LIKE '%.jpg' OR a.filename LIKE '%.png' OR a.filename LIKE '%.heic') LIMIT 1) as image_filename
             FROM message m
             LEFT JOIN handle h ON h.ROWID = m.handle_id
             LEFT JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
@@ -463,11 +465,19 @@ def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None, auto
 
         total_count = rows[0][9] if rows else 0
         lines = []
-        for dt_raw, is_from_me, text, attr_body, handle_id, display_name, has_attachments, balloon_id, assoc_type, _ in reversed(rows):
+        for dt_raw, is_from_me, text, attr_body, handle_id, display_name, has_attachments, balloon_id, assoc_type, _, image_filename in reversed(rows):
             speaker = "Me" if is_from_me == 1 else (handle_id or display_name or "Them")
             dt_txt = apple_timestamp_to_iso(dt_raw)
             
             cleaned = (text or "").replace("\ufffc", "").replace("\n", " ").strip()
+            
+            # If it's an image, get the vision description
+            if image_filename and os.path.exists(os.path.expanduser(image_filename)):
+                vision_desc = describe_image(image_filename)
+                if cleaned:
+                    cleaned = f"{cleaned} {vision_desc}"
+                else:
+                    cleaned = vision_desc
             
             # Fallback: Try to extract text from attributedBody if text is empty
             if not cleaned and attr_body:

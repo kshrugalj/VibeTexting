@@ -273,7 +273,16 @@ def main():
     parser.add_argument("--delay", type=int, default=None, help="Delay in seconds before auto-responding")
     parser.add_argument("--full", action="store_true", help="Use the entire chat history as context (warning: may exceed model limit)")
     parser.add_argument("--list-groups", action="store_true", help="List recent group chats and exit")
+    parser.add_argument("--dashboard", action="store_true", help="Launch the local Ghost Dashboard (Web UI)")
     args = parser.parse_args()
+
+    if args.dashboard:
+        import uvicorn
+        from .server import app
+        print(f"\n{CLR_VIBE}--- 👻 Ghost Dashboard Launching ---{CLR_RESET}")
+        print(f"{CLR_DIM}Access your mission control at http://localhost:8000{CLR_RESET}")
+        uvicorn.run(app, host="0.0.0.0", port=8000)
+        return 0
 
     if args.setup:
         config = prompt_setup_config()
