@@ -5,6 +5,28 @@ from typing import List, Tuple, Optional, Dict
 from .config import get_chat_db_path, normalize_chat_key
 from .contacts import resolve_contacts_aliases
 
+# --- RAG 2.0: Semantic Memory Initialization ---
+try:
+    import chromadb
+    from chromadb.utils import embedding_functions
+    
+    # Persistent storage for embeddings
+    CHROMA_DATA_PATH = os.path.join(os.path.expanduser("~"), ".vibetexting", "chroma_db")
+    os.makedirs(CHROMA_DATA_PATH, exist_ok=True)
+    
+    chroma_client = chromadb.PersistentClient(path=CHROMA_DATA_PATH)
+    # Using a lightweight, high-performance local embedding model
+    embedding_func = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+    message_collection = chroma_client.get_or_create_collection(
+        name="messages", 
+        embedding_function=embedding_func,
+        metadata={"hnsw:space": "cosine"}
+    )
+    RAG_ENABLED = True
+except ImportError:
+    RAG_ENABLED = False
+    print("⚠️ ChromaDB or Sentence-Transformers not found. Semantic Memory (RAG) is disabled.")
+
 def fuzzy_name_match(query: str, target: str) -> float:
     """Very simple fuzzy matching score between 0 and 100."""
     if not query or not target:
@@ -512,8 +534,138 @@ def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None, auto
         if conn is not None:
             conn.close()
 
+def index_chat_messages(chat_id: int):
+    """
+    Syncs messages from iMessage SQLite to ChromaDB for a specific chat.
+    We use a simple high-water mark approach based on timestamps.
+    """
+    if not RAG_ENABLED:
+        return
+
+    db_path = get_chat_db_path()
+    if not os.path.exists(db_path):
+        return
+
+    # 1. Get the last indexed message timestamp for this chat
+    last_indexed = 0
+    try:
+        results = message_collection.get(
+            where={"chat_id": chat_id},
+            limit=1,
+            include=["metadatas"]
+        )
+        if results["metadatas"]:
+            # Find the max timestamp we have for this chat
+            # Note: In a full implementation, we'd store the high-water mark separately
+            # For simplicity, we query the latest in this batch
+            latest_rows = message_collection.get(
+                where={"chat_id": chat_id},
+                # We can't sort by metadata in basic Chroma, so we'd fetch more
+                # or just trust the SQLite load logic below.
+            )
+            if latest_rows["metadatas"]:
+                last_indexed = max(m["timestamp"] for m in latest_rows["metadatas"])
+    except Exception:
+        pass
+
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        # Fetch new messages after the last indexed timestamp
+        query = """
+            SELECT m.ROWID, m.date, m.is_from_me, m.text, COALESCE(h.id, h.uncanonicalized_id)
+            FROM message m
+            LEFT JOIN handle h ON h.ROWID = m.handle_id
+            LEFT JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+            WHERE cmj.chat_id = ?
+              AND m.text IS NOT NULL
+              AND m.text != ''
+              AND (m.associated_message_type IS NULL OR m.associated_message_type = 0)
+              AND (CASE WHEN m.date > 10000000000 THEN m.date / 1000000000 ELSE m.date END) > ?
+            ORDER BY m.date ASC
+        """
+        cursor.execute(query, [chat_id, last_indexed])
+        rows = cursor.fetchall()
+        
+        if not rows:
+            return
+
+        print(f"🧠 Indexing {len(rows)} new messages for semantic memory...")
+        
+        documents = []
+        metadatas = []
+        ids = []
+        
+        for row_id, dt_raw, is_from_me, text, handle_id in rows:
+            speaker = "Me" if is_from_me == 1 else (handle_id or "Them")
+            timestamp = dt_raw / 1000000000 if dt_raw > 10000000000 else dt_raw
+            
+            # Clean text
+            cleaned = text.replace("\ufffc", "").strip()
+            if not cleaned:
+                continue
+                
+            documents.append(cleaned)
+            metadatas.append({
+                "chat_id": chat_id,
+                "speaker": speaker,
+                "timestamp": timestamp,
+                "is_from_me": bool(is_from_me)
+            })
+            ids.append(f"msg_{chat_id}_{row_id}")
+            
+        # Batch add to ChromaDB
+        if documents:
+            message_collection.add(
+                documents=documents,
+                metadatas=metadatas,
+                ids=ids
+            )
+            print(f"✅ Indexed {len(documents)} messages.")
+            
+    except Exception as e:
+        print(f"❌ Error during indexing: {e}")
+    finally:
+        conn.close()
+
 def search_relevant_history(chat_id: int, query_text: str, limit: int = 5) -> str:
-    """Finds old messages in this chat that match keywords in the query_text."""
+    """
+    Finds old messages in this chat using semantic similarity (RAG).
+    Falls back to keyword search if RAG is disabled.
+    """
+    if not query_text:
+        return ""
+
+    if RAG_ENABLED:
+        try:
+            # Trigger lazy indexing if needed (in a real app, this might be backgrounded)
+            # For this MVP, we index before searching to ensure fresh data
+            index_chat_messages(chat_id)
+
+            results = message_collection.query(
+                query_texts=[query_text],
+                n_results=limit,
+                where={"chat_id": chat_id}
+            )
+            
+            if not results["documents"] or not results["documents"][0]:
+                return ""
+                
+            lines = []
+            # results["documents"][0] is the list of matches for the first query
+            for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
+                dt_txt = apple_timestamp_to_iso(meta["timestamp"])
+                lines.append(f"[{dt_txt}] {meta['speaker']}: {doc}")
+            
+            # Sort by timestamp to preserve conversation flow
+            lines.sort() 
+            return "\n".join(lines)
+            
+        except Exception as e:
+            print(f"⚠️ Semantic search failed: {e}. Falling back to keywords.")
+            # fall through to keyword search
+
+    # --- Legacy Keyword Fallback ---
     db_path = get_chat_db_path()
     if not os.path.exists(db_path) or not query_text:
         return ""

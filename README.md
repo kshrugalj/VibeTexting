@@ -70,7 +70,7 @@ VibeTexting/
 
 ## V2.0 Roadmap
 
-- [ ] **Semantic Memory (RAG 2.0)**: Transition from SQL keywords to Local Vector Embeddings (ChromaDB).
+- [x] **Semantic Memory (RAG 2.0)**: Transitioned from SQL keywords to Local Vector Embeddings (ChromaDB).
 - [ ] **Multi-Modal Support**: Vision model integration for describing image/meme attachments.
 - [ ] **Ghost Dashboard**: A local Web Dashboard (FastAPI/React) for batch-managing multiple threads.
 - [ ] **Contact Intelligence**: Native macOS Contacts sync for relationship identification.
