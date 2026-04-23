@@ -122,7 +122,7 @@ def _get_contacts_via_applescript(chat_filter: str) -> list:
         return []
 
     contact_matches = []
-    lines = result.stdout.strip().split("\\n")
+    lines = result.stdout.strip().split("\n")
     
     for line in lines:
         line = line.strip()

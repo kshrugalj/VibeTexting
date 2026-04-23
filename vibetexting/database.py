@@ -5,6 +5,7 @@ from typing import List, Tuple, Optional, Dict
 from .config import get_chat_db_path, normalize_chat_key
 from .contacts import resolve_contacts_aliases
 from .vision import describe_image
+from .utils import fuzzy_name_match
 
 # --- RAG 2.0: Semantic Memory Initialization ---
 try:
@@ -28,18 +29,6 @@ except ImportError:
     RAG_ENABLED = False
     print("⚠️ ChromaDB or Sentence-Transformers not found. Semantic Memory (RAG) is disabled.")
 
-def fuzzy_name_match(query: str, target: str) -> float:
-    """Very simple fuzzy matching score between 0 and 100."""
-    if not query or not target:
-        return 0.0
-    q = query.lower().strip()
-    t = target.lower().strip()
-    if q == t:
-        return 100.0
-    if q in t:
-        return 80.0 + (len(q) / len(t) * 15.0)
-    return 0.0
-
 def apple_timestamp_to_iso(raw_date):
     """Convert Apple's CoreData/iMessage timestamp to ISO-like string."""
     try:
@@ -53,13 +42,11 @@ def apple_timestamp_to_iso(raw_date):
     except Exception:
         return "unknown-time"
 
-def resolve_chat_matches(chat_filter: str, auto_select: bool = False) -> List[Tuple[float, int, str]]:
+def resolve_chat_matches(chat_filter: str, auto_select: bool = False) -> List[Tuple[float, int, str, bool]]:
     db_path = get_chat_db_path()
     if not os.path.exists(db_path):
         return []
 
-    if not auto_select:
-        print(f"📊 Searching iMessage database...")
     conn = None
     try:
         conn = sqlite3.connect(db_path)
@@ -82,10 +69,6 @@ def resolve_chat_matches(chat_filter: str, auto_select: bool = False) -> List[Tu
             """
         )
         rows = cursor.fetchall()
-        
-        # Debug: Log total chats found
-        if not auto_select:
-            print(f"[DEBUG] Total chats in database: {len(rows)}")
     except (sqlite3.OperationalError, sqlite3.DatabaseError):
         return []
     finally:
@@ -93,16 +76,12 @@ def resolve_chat_matches(chat_filter: str, auto_select: bool = False) -> List[Tu
             conn.close()
 
     # Also scan contacts for any identifiers that might match the recipient
-    candidate_terms = [chat_filter]
+    candidate_terms = {chat_filter}
     aliases = resolve_contacts_aliases(chat_filter)
     if aliases:
-        candidate_terms.extend(aliases)
-    
-    if not auto_select:
-        print(f"[DEBUG] Searching for terms: {candidate_terms}")
+        candidate_terms.update(aliases)
 
     matches = []
-
     chat_data = {}
     for chat_id, display_name, chat_identifier, handle_id, uncanonicalized_id, last_msg_date in rows:
         if chat_id is None:
@@ -114,26 +93,19 @@ def resolve_chat_matches(chat_filter: str, auto_select: bool = False) -> List[Tu
                 "handles": set(),
                 "last_msg_date": last_msg_date or 0
             }
-        if handle_id:
-            chat_data[chat_id]["handles"].add(handle_id)
-        if uncanonicalized_id:
-            chat_data[chat_id]["handles"].add(uncanonicalized_id)
+        # Use handle_id if available, otherwise fallback to uncanonicalized_id
+        # We only add ONE identifier per handle row to avoid artificially increasing handle count
+        hid = handle_id or uncanonicalized_id
+        if hid:
+            chat_data[chat_id]["handles"].add(hid)
 
-    # Debug: Log chat types
-    dm_count = 0
-    group_count = 0
     for chat_id, data in chat_data.items():
         display_name = data["display_name"]
         chat_identifier = data["chat_identifier"]
         handles = data["handles"]
-        
-        # Determine if it's a DM or group
+
+        # Determine if it's a DM or group based on unique handle identifiers
         is_group = len(handles) > 1
-        if is_group:
-            group_count += 1
-        else:
-            dm_count += 1
-        
         label = _build_chat_label(chat_id, display_name, chat_identifier, handles)
 
         best_score = 0.0
@@ -145,41 +117,29 @@ def resolve_chat_matches(chat_filter: str, auto_select: bool = False) -> List[Tu
                 score = fuzzy_name_match(term, display_name)
                 if score > best_score:
                     best_score = score
-                    if not auto_select and score > 35:
-                        print(f"[DEBUG] Match via display_name '{display_name}' with term '{term}': {score}")
 
             # 2. Check chat identifier
             if chat_identifier:
                 score = fuzzy_name_match(term, chat_identifier)
                 if score > best_score:
                     best_score = score
-                    if not auto_select and score > 35:
-                        print(f"[DEBUG] Match via chat_identifier '{chat_identifier}' with term '{term}': {score}")
-                
+
                 if normalized_term and normalized_term in normalize_chat_key(chat_identifier):
                     if 90.0 > best_score:
                         best_score = 90.0
-                        if not auto_select:
-                            print(f"[DEBUG] Match via normalized chat_identifier '{chat_identifier}': 90.0")
 
             # 3. Check handles (phone/email)
             for h in handles:
                 score = fuzzy_name_match(term, h)
                 if score > best_score:
                     best_score = score
-                    if not auto_select and score > 35:
-                        print(f"[DEBUG] Match via handle '{h}' with term '{term}': {score}")
-                
+
                 if normalize_chat_key(h) == normalized_term:
                     if 100.0 > best_score:
                         best_score = 100.0
-                        if not auto_select:
-                            print(f"[DEBUG] Exact match via handle '{h}': 100.0")
                 elif normalized_term and normalized_term in normalize_chat_key(h):
                     if 90.0 > best_score:
                         best_score = 90.0
-                        if not auto_select:
-                            print(f"[DEBUG] Partial match via handle '{h}': 90.0")
 
             # 4. Check the label
             score = fuzzy_name_match(term, label)
@@ -187,29 +147,17 @@ def resolve_chat_matches(chat_filter: str, auto_select: bool = False) -> List[Tu
                 best_score = score
 
         if best_score > 35:
-            is_group = len(handles) > 1
-            chat_type = "GROUP" if is_group else "DM"
-            if not auto_select:
-                print(f"[DEBUG] [{chat_type}] Chat ID {chat_id}: '{label}' - Score: {best_score}")
             # Store is_group (as an int for sorting: 0 for DM, 1 for group)
-            matches.append((best_score, chat_id, label, last_msg_date, is_group))
-    
-    if not auto_select:
-        print(f"[DEBUG] Summary: {dm_count} DMs, {group_count} groups scanned")
+            matches.append((best_score, chat_id, label, data["last_msg_date"], is_group))
 
     if not matches:
-        if not auto_select:
-            print("❌ No matching chats found in iMessage database.")
         return []
 
     # Sort by fuzzy score, then by recency
     matches.sort(key=lambda item: (item[0], item[3]), reverse=True)
 
-    if not auto_select:
-        print(f"✅ Found {len(matches)} potential chat matches.")
     # Return matches with (score, id, label, is_group)
     return [(m[0], m[1], m[2], m[4]) for m in matches]
-
 def _build_chat_label(chat_id: int, display_name: str, chat_identifier: str, handles: set) -> str:
     if display_name:
         return display_name
@@ -443,7 +391,6 @@ def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None, auto
                 m.cache_has_attachments,
                 m.balloon_bundle_id,
                 m.associated_message_type,
-                (SELECT COUNT(*) FROM message m2 JOIN chat_message_join cmj2 ON m2.ROWID = cmj2.message_id WHERE cmj2.chat_id = ?) as total_count,
                 (SELECT a.filename FROM attachment a JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id WHERE maj.message_id = m.ROWID AND (a.mime_type LIKE 'image/%' OR a.uti LIKE 'public.image' OR a.filename LIKE '%.jpg' OR a.filename LIKE '%.png' OR a.filename LIKE '%.heic') LIMIT 1) as image_filename
             FROM message m
             LEFT JOIN handle h ON h.ROWID = m.handle_id
@@ -454,7 +401,7 @@ def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None, auto
             ORDER BY (CASE WHEN m.date > 10000000000 THEN m.date / 1000000000 ELSE m.date END) DESC, m.ROWID DESC
             {'' if limit is None else 'LIMIT ?'}
         """
-        query_params = [chat_id, chat_id]
+        query_params = [chat_id]
         if limit is not None:
             query_params.append(limit)
         cursor.execute(query, query_params)
@@ -463,9 +410,12 @@ def load_recent_chat_history(chat_filter: str, limit: Optional[int] = None, auto
         if not rows:
             return "", 0, resolved_label, is_group_chat, None, chat_id, chat_guid, False
 
-        total_count = rows[0][9] if rows else 0
+        # Fetch total count separately for efficiency
+        cursor.execute("SELECT COUNT(*) FROM chat_message_join WHERE chat_id = ?", [chat_id])
+        total_count = cursor.fetchone()[0]
+        
         lines = []
-        for dt_raw, is_from_me, text, attr_body, handle_id, display_name, has_attachments, balloon_id, assoc_type, _, image_filename in reversed(rows):
+        for dt_raw, is_from_me, text, attr_body, handle_id, display_name, has_attachments, balloon_id, assoc_type, image_filename in reversed(rows):
             speaker = "Me" if is_from_me == 1 else (handle_id or display_name or "Them")
             dt_txt = apple_timestamp_to_iso(dt_raw)
             

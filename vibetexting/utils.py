@@ -53,42 +53,41 @@ def fuzzy_name_match(search_term: str, field_value: str) -> float:
     score = (1 - distance / max_len) * 100
     return score
 
-def escape_applescript_string(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')
-
 def send_imessage(recipient_identifier: str, message_text: str, chat_id: Optional[str] = None) -> bool:
-    """Sends an iMessage using AppleScript (macOS only).
+    """Sends an iMessage using AppleScript (macOS only), securely passing arguments.
     
     Args:
         recipient_identifier: Phone number, email, or display name
         message_text: The message to send
         chat_id: Optional iMessage chat_identifier (GUID) for targeting existing chats
     """
-    escaped_msg = escape_applescript_string(message_text)
-    
     # If we have a chat_identifier (GUID), try to target the specific existing chat
     # This prevents creating duplicate chats for group conversations
     if chat_id is not None:
         # Try targeting by chat_identifier (GUID) which is the actual iMessage ID
-        script = f'''
-        tell application "Messages"
-            try
-                set targetChat to (1st chat whose id is "{chat_id}")
-                send "{escaped_msg}" to targetChat
-                return "success"
-            on error
+        script = '''
+        on run argv
+            set chatId to item 1 of argv
+            set msg to item 2 of argv
+            tell application "Messages"
                 try
-                    set targetChat to (1st chat whose id contains "{chat_id}")
-                    send "{escaped_msg}" to targetChat
+                    set targetChat to (1st chat whose id is chatId)
+                    send msg to targetChat
                     return "success"
                 on error
-                    return "failed"
+                    try
+                        set targetChat to (1st chat whose id contains chatId)
+                        send msg to targetChat
+                        return "success"
+                    on error
+                        return "failed"
+                    end try
                 end try
-            end try
-        end tell
+            end tell
+        end run
         '''
         try:
-            result = subprocess.run(['osascript', '-e', script], check=True, capture_output=True, text=True)
+            result = subprocess.run(['osascript', '-e', script, chat_id, message_text], check=True, capture_output=True, text=True)
             if result.stdout.strip() == "success":
                 return True
         except subprocess.CalledProcessError:
@@ -96,27 +95,35 @@ def send_imessage(recipient_identifier: str, message_text: str, chat_id: Optiona
     
     # This AppleScript attempts to find a buddy by identifier (email/phone)
     # It's more robust than relying on a window being open.
-    script = f'''
-    tell application "Messages"
-        set targetService to 1st service whose service type is iMessage
-        set targetBuddy to buddy "{recipient_identifier}" of targetService
-        send "{escaped_msg}" to targetBuddy
-    end tell
+    script = '''
+    on run argv
+        set recipientId to item 1 of argv
+        set msg to item 2 of argv
+        tell application "Messages"
+            set targetService to 1st service whose service type is iMessage
+            set targetBuddy to buddy recipientId of targetService
+            send msg to targetBuddy
+        end tell
+    end run
     '''
     try:
-        subprocess.run(['osascript', '-e', script], check=True, capture_output=True)
+        subprocess.run(['osascript', '-e', script, recipient_identifier, message_text], check=True, capture_output=True)
         return True
     except subprocess.CalledProcessError:
         # Fallback: simpler script that targets the 'active' chat or a generic buddy string
         # Useful if the buddy lookup above fails for complex identifiers
-        fallback_script = f'''
-        tell application "Messages"
-            set targetBuddy to (participant 1 of (1st chat whose id contains "{recipient_identifier}"))
-            send "{escaped_msg}" to targetBuddy
-        end tell
+        fallback_script = '''
+        on run argv
+            set recipientId to item 1 of argv
+            set msg to item 2 of argv
+            tell application "Messages"
+                set targetBuddy to (participant 1 of (1st chat whose id contains recipientId))
+                send msg to targetBuddy
+            end tell
+        end run
         '''
         try:
-            subprocess.run(['osascript', '-e', fallback_script], check=True, capture_output=True)
+            subprocess.run(['osascript', '-e', fallback_script, recipient_identifier, message_text], check=True, capture_output=True)
             return True
         except Exception:
             return False
