@@ -29,6 +29,7 @@ my_chat_history.txt
 
 # Tools
 .qwen/
+.gemini/
 github-devops/
 github-devops.skill
 
