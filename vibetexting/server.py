@@ -12,13 +12,13 @@ from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(title="Ghost Dashboard API")
 
-# Mount the static files from the React build directory
-# This allows the FastAPI server to serve our dashboard UI
-web_dist_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "vibetexting-web", "dist")
-if os.path.exists(web_dist_path):
-    app.mount("/", StaticFiles(directory=web_dist_path, html=True), name="static")
-else:
-    print(f"⚠️ Warning: Web build directory not found at {web_dist_path}. Dashboard UI will not be available.")
+@app.middleware("http")
+async def add_no_cache_header(request, call_next):
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 # Global state for background Auto-Pilot tasks
 # {chat_id: {"task": Task, "goal": str, "active": bool}}
@@ -153,3 +153,16 @@ async def toggle_autopilot(req: AutopilotToggleRequest, background_tasks: Backgr
                 autopilot_sessions[chat_id]["active"] = False
                 
     return {"status": "success", "enabled": req.enabled}
+
+# Mount the static files from the React build directory (Fallback)
+# Define this LAST so it doesn't swallow /api routes
+server_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(server_dir)
+web_dist_path = os.path.join(project_root, "vibetexting-web", "dist")
+
+if os.path.exists(web_dist_path):
+    print(f"🚀 Serving Ghost Dashboard from: {web_dist_path}")
+    app.mount("/", StaticFiles(directory=web_dist_path, html=True), name="static")
+else:
+    print(f"❌ Error: Web build directory not found at {web_dist_path}")
+    print("   Please run: cd vibetexting-web && npm run build")

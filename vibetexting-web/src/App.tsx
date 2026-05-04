@@ -111,12 +111,13 @@ function App() {
   };
 
   return (
-    <div className="flex h-screen bg-ghost-900 text-gray-200 font-sans">
+    <div className="flex h-screen bg-ghost-900 text-gray-200 font-inter antialiased">
       {/* Sidebar */}
-      <div className="w-80 bg-ghost-800 border-r border-ghost-700 flex flex-col">
-        <div className="p-6 border-b border-ghost-700">
-          <h1 className="text-xl font-bold text-ghost-vibe tracking-tight flex items-center">
-            <span className="mr-2">👻</span> Ghost Dashboard
+      <div className="w-80 bg-black border-r border-zinc-800 flex flex-col shadow-2xl">
+        <div className="p-6 border-b border-zinc-800 flex items-center space-x-3">
+          <span className="material-symbols-outlined text-gold-accent text-lg">ghost</span>
+          <h1 className="text-[10px] font-bold text-gold-accent tracking-[0.3em] flex items-center uppercase font-mono gold-glow">
+            MISSION_CONTROL
           </h1>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
@@ -124,52 +125,73 @@ function App() {
             <button
               key={chat.chat_id}
               onClick={() => setSelectedChat(chat)}
-              className={`w-full text-left p-3 rounded-lg transition-all duration-200 flex items-center justify-between ${
+              className={`w-full text-left p-3 rounded-lg transition-all duration-300 flex items-center justify-between group ${
                 selectedChat?.chat_id === chat.chat_id 
-                ? 'bg-ghost-vibe bg-opacity-20 text-ghost-vibe border border-ghost-vibe border-opacity-30' 
-                : 'hover:bg-ghost-700 text-gray-400'
+                ? 'bg-gold-accent/10 text-gold-accent border-r-2 border-gold-accent' 
+                : 'hover:bg-zinc-900/50 text-zinc-500 hover:text-zinc-300'
               }`}
             >
-              <div className="truncate font-medium">{chat.label}</div>
+              <div className="flex items-center space-x-3 truncate">
+                <span className={`material-symbols-outlined text-sm ${selectedChat?.chat_id === chat.chat_id ? 'text-gold-accent' : 'text-zinc-700'}`}>
+                  {chat.participant_count > 1 ? 'group' : 'person'}
+                </span>
+                <div className={`truncate font-mono text-[11px] uppercase tracking-wider ${selectedChat?.chat_id === chat.chat_id ? 'gold-glow' : ''}`}>
+                  {chat.label}
+                </div>
+              </div>
               {autopilotStatus[chat.chat_id]?.active && (
-                <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse ml-2 flex-shrink-0" />
+                <span className="w-2 h-2 bg-status-pulse rounded-full shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse" />
               )}
             </button>
           ))}
         </div>
+        
+        {/* Sidebar Footer */}
+        <div className="p-4 border-t border-zinc-800 bg-zinc-950">
+          <div className="flex items-center justify-between px-2">
+            <span className="text-[9px] font-mono text-zinc-600 uppercase tracking-tighter">STATUS_STEALTH</span>
+            <div className="flex items-center space-x-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-status-pulse" />
+              <span className="text-[9px] font-mono text-status-pulse uppercase">Linked</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 bg-ghost-900">
         {selectedChat ? (
           <>
             {/* Chat Header */}
-            <div className="h-16 px-6 border-b border-ghost-700 flex items-center justify-between bg-ghost-800 bg-opacity-50">
-              <div className="flex items-center space-x-3">
-                <div className="w-8 h-8 rounded-full bg-ghost-600 flex items-center justify-center text-sm font-bold">
+            <div className="h-16 px-6 border-b border-zinc-800 flex items-center justify-between bg-black/60 backdrop-blur-xl z-10 shadow-lg">
+              <div className="flex items-center space-x-4">
+                <div className="w-9 h-9 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-[10px] font-mono font-bold text-gold-accent chrome-reflect">
                   {selectedChat.label[0].toUpperCase()}
                 </div>
-                <h2 className="font-semibold text-lg">{selectedChat.label}</h2>
+                <div>
+                  <h2 className="font-mono text-[11px] uppercase tracking-[0.2em] text-zinc-300">{selectedChat.label}</h2>
+                  <div className="text-[8px] font-mono text-zinc-600 uppercase tracking-widest mt-0.5">Encrypted_Ghost_Link</div>
+                </div>
               </div>
               
               <div className="flex items-center space-x-4">
-                <div className="flex items-center space-x-2 bg-ghost-700 p-1 rounded-lg">
+                <div className="flex items-center space-x-2 bg-zinc-900/50 border border-zinc-800 p-1 rounded-lg">
                   <input 
                     type="text" 
-                    placeholder="Auto-Pilot Goal..."
-                    className="bg-transparent border-none focus:ring-0 text-sm w-48 px-2"
+                    placeholder="SET_MISSION_GOAL..."
+                    className="bg-transparent border-none focus:ring-0 text-[10px] font-mono text-gold-accent w-64 px-2 placeholder:text-zinc-700"
                     value={goal || autopilotStatus[selectedChat.chat_id]?.goal || ""}
                     onChange={(e) => setGoal(e.target.value)}
                   />
                   <button 
                     onClick={() => toggleAutopilot(!autopilotStatus[selectedChat.chat_id]?.active)}
-                    className={`px-3 py-1 rounded text-xs font-bold transition-all ${
+                    className={`px-4 py-1.5 rounded text-[10px] font-mono font-bold tracking-tighter transition-all ${
                       autopilotStatus[selectedChat.chat_id]?.active 
-                      ? 'bg-red-500 hover:bg-red-600 text-white' 
-                      : 'bg-ghost-vibe hover:opacity-90 text-white'
+                      ? 'bg-red-500/20 text-red-500 border border-red-500/50' 
+                      : 'bg-gold-accent text-black hover:brightness-110 active:scale-95'
                     }`}
                   >
-                    {autopilotStatus[selectedChat.chat_id]?.active ? 'STOP AUTO' : 'START AUTO'}
+                    {autopilotStatus[selectedChat.chat_id]?.active ? 'ABORT_AUTO' : 'ENGAGE_AUTO'}
                   </button>
                 </div>
               </div>
@@ -178,26 +200,28 @@ function App() {
             {/* Messages */}
             <div 
               ref={scrollRef}
-              className="flex-1 overflow-y-auto p-6 space-y-4 scroll-smooth"
+              className="flex-1 overflow-y-auto p-8 space-y-6 scroll-smooth bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]"
             >
               {loading ? (
-                <div className="flex items-center justify-center h-full text-ghost-500 italic">
-                  Loading semantic memory...
+                <div className="flex items-center justify-center h-full text-zinc-800 font-mono text-[10px] animate-pulse uppercase tracking-[0.5em]">
+                  Synchronizing...
                 </div>
               ) : (
                 history.split('\n').map((line, i) => {
                   const isMe = line.includes("]: Me: ");
                   return (
                     <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[80%] p-3 rounded-2xl text-sm shadow-sm ${
+                      <div className={`max-w-[70%] p-4 rounded-xl text-sm ${
                         isMe 
-                        ? 'bg-ghost-vibe text-white rounded-tr-none' 
-                        : 'bg-ghost-700 text-gray-200 rounded-tl-none border border-ghost-600'
+                        ? 'bg-gold-accent text-black font-medium rounded-tr-none shadow-xl shadow-gold-accent/10 border border-gold-accent/20' 
+                        : 'chrome-reflect text-zinc-300 rounded-tl-none border border-zinc-800/50'
                       }`}>
-                        <div className="text-[10px] opacity-50 mb-1">
+                        <div className={`text-[9px] font-mono mb-2 uppercase tracking-tighter opacity-50 ${isMe ? 'text-black' : 'text-gold-accent'}`}>
                           {line.split('] ')[0].replace('[', '')}
                         </div>
-                        {line.split(': ').slice(2).join(': ') || line.split(': ').slice(1).join(': ')}
+                        <p className="leading-relaxed font-body-base text-[13px]">
+                          {line.split(': ').slice(2).join(': ') || line.split(': ').slice(1).join(': ')}
+                        </p>
                       </div>
                     </div>
                   );
@@ -206,31 +230,32 @@ function App() {
             </div>
 
             {/* Input Area */}
-            <div className="p-4 bg-ghost-800 border-t border-ghost-700">
-              <div className="max-w-4xl mx-auto flex items-center space-x-3 bg-ghost-700 p-2 rounded-2xl border border-ghost-600 focus-within:border-ghost-vibe transition-colors">
+            <div className="p-6 bg-black/20 border-t border-zinc-800 backdrop-blur-sm">
+              <div className="max-w-4xl mx-auto flex items-center space-x-4 bg-zinc-900/80 p-2 rounded-xl border border-zinc-800 focus-within:border-gold-accent/50 transition-all shadow-inner">
                 <input
                   type="text"
-                  placeholder={`Reply to ${selectedChat.label}...`}
-                  className="flex-1 bg-transparent border-none focus:ring-0 px-4 py-2"
+                  placeholder={`EXECUTE_COMMAND_TO_${selectedChat.label.toUpperCase().replace(/ /g, '_')}...`}
+                  className="flex-1 bg-transparent border-none focus:ring-0 px-4 py-2 font-mono text-[11px] text-zinc-300 placeholder:text-zinc-700"
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
                 />
                 <button 
                   onClick={sendMessage}
-                  className="w-10 h-10 bg-ghost-vibe text-white rounded-xl flex items-center justify-center hover:opacity-90 transition-opacity"
+                  className="w-10 h-10 bg-gold-accent text-black rounded-lg flex items-center justify-center hover:scale-105 transition-transform active:scale-95 shadow-lg shadow-gold-accent/10"
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 transform rotate-90" viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
-                  </svg>
+                  <span className="material-symbols-outlined font-bold text-lg">send</span>
                 </button>
               </div>
             </div>
           </>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-ghost-500 space-y-4">
-            <div className="text-6xl grayscale opacity-20">👻</div>
-            <p className="text-lg font-medium">Select a conversation to haunt.</p>
+          <div className="flex-1 flex flex-col items-center justify-center text-zinc-900 space-y-6">
+            <div className="text-9xl opacity-5 font-mono tracking-tighter select-none">GHOST_OS</div>
+            <div className="flex flex-col items-center space-y-2">
+              <p className="text-[10px] font-mono uppercase tracking-[0.4em] opacity-30">System_Idle</p>
+              <p className="text-[9px] font-mono uppercase tracking-[0.2em] opacity-20 italic">Awaiting Mission Selection</p>
+            </div>
           </div>
         )}
       </div>
