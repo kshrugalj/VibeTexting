@@ -8,26 +8,42 @@ from .vision import describe_image
 from .utils import fuzzy_name_match
 
 # --- RAG 2.0: Semantic Memory Initialization ---
-try:
-    import chromadb
-    from chromadb.utils import embedding_functions
-    
-    # Persistent storage for embeddings
-    CHROMA_DATA_PATH = os.path.join(os.path.expanduser("~"), ".vibetexting", "chroma_db")
-    os.makedirs(CHROMA_DATA_PATH, exist_ok=True)
-    
-    chroma_client = chromadb.PersistentClient(path=CHROMA_DATA_PATH)
-    # Using a lightweight, high-performance local embedding model
-    embedding_func = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
-    message_collection = chroma_client.get_or_create_collection(
-        name="messages", 
-        embedding_function=embedding_func,
-        metadata={"hnsw:space": "cosine"}
-    )
-    RAG_ENABLED = True
-except ImportError:
-    RAG_ENABLED = False
-    print("⚠️ ChromaDB or Sentence-Transformers not found. Semantic Memory (RAG) is disabled.")
+# This is intentionally lazy. Importing the embedding stack at module load time
+# can spike CPU/RAM and make the whole app feel frozen.
+CHROMA_DATA_PATH = os.path.join(os.path.expanduser("~"), ".vibetexting", "chroma_db")
+RAG_ENABLED = True
+_rag_init_attempted = False
+message_collection = None
+_recent_chats_cache: dict[int, tuple[float, List[Dict[str, object]]]] = {}
+
+def _ensure_rag_ready() -> bool:
+    global _rag_init_attempted, message_collection, RAG_ENABLED
+
+    if message_collection is not None:
+        return True
+    if _rag_init_attempted:
+        return False
+
+    _rag_init_attempted = True
+    try:
+        import chromadb
+        from chromadb.utils import embedding_functions
+
+        os.makedirs(CHROMA_DATA_PATH, exist_ok=True)
+        chroma_client = chromadb.PersistentClient(path=CHROMA_DATA_PATH)
+        embedding_func = embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name="all-MiniLM-L6-v2"
+        )
+        message_collection = chroma_client.get_or_create_collection(
+            name="messages",
+            embedding_function=embedding_func,
+            metadata={"hnsw:space": "cosine"}
+        )
+        return True
+    except Exception as e:
+        RAG_ENABLED = False
+        print(f"⚠️ Semantic Memory (RAG) disabled: {e}")
+        return False
 
 def apple_timestamp_to_iso(raw_date):
     """Convert Apple's CoreData/iMessage timestamp to ISO-like string."""
@@ -208,6 +224,57 @@ def _get_chat_participants(conn: sqlite3.Connection, chat_id: int) -> List[str]:
         [chat_id]
     )
     return [r[0] for r in cursor.fetchall() if r[0]]
+
+def list_recent_chats(limit: int = 10) -> List[Dict[str, object]]:
+    db_path = get_chat_db_path()
+    if not os.path.exists(db_path):
+        return []
+
+    now = datetime.now().timestamp()
+    cached = _recent_chats_cache.get(limit)
+    if cached and now - cached[0] < 3:
+        return cached[1]
+
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                c.ROWID,
+                c.display_name,
+                c.chat_identifier,
+                (SELECT COUNT(*) FROM chat_handle_join WHERE chat_id = c.ROWID) as participant_count,
+                (SELECT MAX(date) FROM message m
+                 JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+                 WHERE cmj.chat_id = c.ROWID) as last_msg_date
+            FROM chat c
+            ORDER BY last_msg_date DESC
+            LIMIT ?
+            """,
+            [limit]
+        )
+        rows = cursor.fetchall()
+
+        chats = []
+        for chat_id, display_name, chat_identifier, participant_count, _ in rows:
+            participants = _get_chat_participants(conn, chat_id)
+            label = _build_chat_label(chat_id, display_name, chat_identifier, set(participants))
+            chats.append(
+                {
+                    "chat_id": chat_id,
+                    "label": label,
+                    "participant_count": int(participant_count or len(participants) or 0),
+                }
+            )
+        _recent_chats_cache[limit] = (now, chats)
+        return chats
+    except (sqlite3.OperationalError, sqlite3.DatabaseError):
+        return []
+    finally:
+        if conn is not None:
+            conn.close()
 
 def list_recent_group_chats(limit: int = 10) -> List[Dict[str, object]]:
     db_path = get_chat_db_path()
@@ -499,7 +566,7 @@ def index_chat_messages(chat_id: int):
     Syncs messages from iMessage SQLite to ChromaDB for a specific chat.
     We use a simple high-water mark approach based on timestamps.
     """
-    if not RAG_ENABLED:
+    if not RAG_ENABLED or not _ensure_rag_ready():
         return
 
     db_path = get_chat_db_path()
@@ -596,7 +663,7 @@ def search_relevant_history(chat_id: int, query_text: str, limit: int = 5) -> st
     if not query_text:
         return ""
 
-    if RAG_ENABLED:
+    if RAG_ENABLED and _ensure_rag_ready():
         try:
             # Trigger lazy indexing if needed (in a real app, this might be backgrounded)
             # For this MVP, we index before searching to ensure fresh data

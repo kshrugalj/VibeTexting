@@ -1,5 +1,5 @@
 from .base import BaseMessagingProvider
-from ..database import load_recent_chat_history, list_recent_group_chats, search_relevant_history
+from ..database import load_recent_chat_history, list_recent_chats, search_relevant_history
 from ..utils import send_imessage
 from typing import List, Optional, Tuple, Dict
 
@@ -23,7 +23,7 @@ class IMessageProvider(BaseMessagingProvider):
         return send_imessage(recipient, text, chat_id=kwargs.get("chat_id"))
 
     def get_recent_chats(self, limit: int = 10) -> List[Dict]:
-        return list_recent_group_chats(limit)
+        return list_recent_chats(limit)
 
     def search_memories(self, chat_id: any, query: str, limit: int = 5) -> str:
         return search_relevant_history(chat_id, query, limit)

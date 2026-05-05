@@ -2,7 +2,11 @@ import os
 import glob
 import sqlite3
 import subprocess
+import time
 from .utils import fuzzy_name_match, normalize_chat_key
+
+_CONTACT_ALIAS_CACHE: dict[str, tuple[float, list[str]]] = {}
+_CONTACT_ALIAS_TTL_SECONDS = 300
 
 def _get_contacts_via_sqlite(chat_filter: str) -> list:
     """Fast, native extraction of macOS Contacts via SQLite."""
@@ -154,6 +158,12 @@ def resolve_contacts_aliases(chat_filter: str) -> list[str]:
     if not chat_filter:
         return []
 
+    cache_key = normalize_chat_key(chat_filter)
+    cached = _CONTACT_ALIAS_CACHE.get(cache_key)
+    now = time.time()
+    if cached and now - cached[0] < _CONTACT_ALIAS_TTL_SECONDS:
+        return cached[1]
+
     print(f"🔍 Searching contacts for '{chat_filter}'...")
     
     # 1. Fast Native SQLite extraction
@@ -164,6 +174,7 @@ def resolve_contacts_aliases(chat_filter: str) -> list[str]:
         contact_matches = _get_contacts_via_applescript(chat_filter)
 
     if not contact_matches:
+        _CONTACT_ALIAS_CACHE[cache_key] = (now, [])
         return []
 
     # Sort by score descending
@@ -197,5 +208,6 @@ def resolve_contacts_aliases(chat_filter: str) -> list[str]:
     
     if unique_aliases:
         print(f"✅ Found {len(unique_aliases)} potential identifiers for {match_count} matching contact(s).")
-        
+    
+    _CONTACT_ALIAS_CACHE[cache_key] = (now, unique_aliases)
     return unique_aliases

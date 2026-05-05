@@ -1,13 +1,12 @@
-import os
 import asyncio
 import threading
+import os
 from typing import List, Dict, Optional
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from .database import load_recent_chat_history, list_recent_group_chats
 from .providers.imessage import IMessageProvider
 from .llm import call_local_llm
-from .config import load_user_config, merge_runtime_settings
+from .config import load_user_config
 from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(title="Ghost Dashboard API")
@@ -21,9 +20,11 @@ async def add_no_cache_header(request, call_next):
     return response
 
 # Global state for background Auto-Pilot tasks
-# {chat_id: {"task": Task, "goal": str, "active": bool}}
+# {chat_id: {"task": asyncio.Task | None, "goal": str, "active": bool}}
 autopilot_sessions = {}
 autopilot_lock = threading.Lock()
+AUTOPILOT_EVENT_LIMIT = 12
+AUTOPILOT_TRANSCRIPT_LIMIT = 16
 
 class MessageRequest(BaseModel):
     text: str
@@ -31,9 +32,54 @@ class MessageRequest(BaseModel):
     chat_guid: Optional[str] = None
 
 class AutopilotToggleRequest(BaseModel):
+    chat_id: int
     chat_filter: str
     goal: str
     enabled: bool
+
+def _record_autopilot_event(chat_id: int, event_type: str, message: str):
+    with autopilot_lock:
+        session = autopilot_sessions.get(chat_id)
+        if not session:
+            return
+        events = session.setdefault("events", [])
+        events.append({"type": event_type, "message": message})
+        if len(events) > AUTOPILOT_EVENT_LIMIT:
+            del events[:-AUTOPILOT_EVENT_LIMIT]
+
+def _record_autopilot_transcript(chat_id: int, speaker: str, message: str):
+    cleaned = " ".join((message or "").split()).strip()
+    if not cleaned:
+        return
+
+    with autopilot_lock:
+        session = autopilot_sessions.get(chat_id)
+        if not session:
+            return
+        transcript = session.setdefault("transcript", [])
+        transcript.append({"speaker": speaker, "message": cleaned[:240]})
+        if len(transcript) > AUTOPILOT_TRANSCRIPT_LIMIT:
+            del transcript[:-AUTOPILOT_TRANSCRIPT_LIMIT]
+
+def _build_autopilot_summary(session: Dict) -> str:
+    transcript = session.get("transcript", [])
+    if not transcript:
+        return "No conversation has happened yet since Auto was engaged."
+
+    incoming = [item["message"] for item in transcript if item.get("speaker") == "them"]
+    replies = [item["message"] for item in transcript if item.get("speaker") == "auto"]
+
+    summary_parts = []
+    if incoming:
+        latest_topics = "; ".join(incoming[-3:])
+        summary_parts.append(f"They talked about {latest_topics}.")
+    if replies:
+        latest_replies = "; ".join(replies[-2:])
+        summary_parts.append(f"Auto replied with {latest_replies}.")
+
+    if not summary_parts:
+        return "Auto has been engaged, but there is not enough conversation yet to summarize."
+    return " ".join(summary_parts)
 
 @app.get("/api/chats")
 async def get_chats():
@@ -66,91 +112,158 @@ async def send_message(chat_id: int, req: MessageRequest):
 @app.get("/api/autopilot/status")
 async def get_autopilot_status():
     with autopilot_lock:
-        return {cid: {"active": data["active"], "goal": data["goal"]} for cid, data in autopilot_sessions.items()}
+        return {
+            cid: {
+                "active": data["active"],
+                "goal": data["goal"],
+                "summary": _build_autopilot_summary(data),
+                "events": data.get("events", []),
+                "transcript": data.get("transcript", []),
+            }
+            for cid, data in autopilot_sessions.items()
+            if data.get("active")
+        }
+
+def _load_vibe_content(vibe_path: Optional[str]) -> str:
+    if vibe_path and os.path.exists(vibe_path):
+        with open(vibe_path, "r", encoding="utf-8") as f:
+            return f.read()
+    return ""
+
+def _maybe_generate_autopilot_reply(
+    provider: IMessageProvider,
+    args,
+    chat_id: int,
+    chat_filter: str,
+    goal: str,
+) -> bool:
+    history_full, _, label, _, context, _, guid, last_is_me = provider.load_history(
+        chat_filter, limit=20, auto_select=True, chat_id=chat_id
+    )
+
+    if not history_full or last_is_me:
+        return False
+
+    from .prompts import build_prompt
+
+    lines = history_full.strip().split("\n")
+    if not lines:
+        return False
+
+    last_line = lines[-1]
+    original_msg = last_line.split(": ", 1)[1] if ": " in last_line else last_line
+    _record_autopilot_event(chat_id, "incoming", f"Incoming: {original_msg[:120]}")
+    _record_autopilot_transcript(chat_id, "them", original_msg)
+    vibe_content = _load_vibe_content(args.vibe)
+
+    prompt = build_prompt(
+        original_msg,
+        vibe_content,
+        history_full,
+        label,
+        context,
+        args.name,
+        None,
+        None,
+        None,
+        goal,
+    )
+
+    reply = call_local_llm(prompt, args.model, args.backend)
+    if "Error" in reply:
+        _record_autopilot_event(chat_id, "error", "Reply generation failed.")
+        return False
+
+    provider.send_message(label, reply, chat_id=guid)
+    _record_autopilot_event(chat_id, "reply", f"Sent: {reply[:120]}")
+    _record_autopilot_transcript(chat_id, "auto", reply)
+    return True
 
 async def _autopilot_loop(chat_id: int, chat_filter: str, goal: str):
     """Background polling loop for a specific chat."""
     provider = IMessageProvider()
-    # Initial state
-    last_history, _, _, _, _, _, _, _ = provider.load_history(chat_filter, limit=1, auto_select=True, chat_id=chat_id)
-    
-    config = load_user_config()
-    # Dummy args for merge_runtime_settings
-    class Args:
-        model = config.get("model")
-        backend = config.get("backend")
-        vibe = config.get("vibe")
-        name = config.get("name")
-        history_limit = 20
-        delay = 0
-    args = Args()
+    try:
+        # Initial state
+        last_history, _, _, _, _, _, _, _ = provider.load_history(
+            chat_filter, limit=1, auto_select=True, chat_id=chat_id
+        )
 
-    while True:
-        with autopilot_lock:
-            if not autopilot_sessions.get(chat_id, {}).get("active"):
-                break
-        
-        await asyncio.sleep(5)
-        
-        try:
-            current_history, _, label, is_group, context, cid, guid, _ = provider.load_history(
-                chat_filter, limit=1, auto_select=True, chat_id=chat_id
-            )
-            
-            if current_history != last_history:
-                # New message detected
-                history_full, _, _, _, context, _, _, last_is_me = provider.load_history(
-                    chat_filter, limit=20, auto_select=True, chat_id=chat_id
+        config = load_user_config()
+
+        class Args:
+            model = config.get("model")
+            backend = config.get("backend")
+            vibe = config.get("vibe")
+            name = config.get("name")
+            history_limit = 20
+            delay = 0
+
+        args = Args()
+        _record_autopilot_event(chat_id, "status", "Auto engaged.")
+
+        # If the latest current message is already from the other person,
+        # respond immediately instead of waiting for a future poll change.
+        responded_immediately = _maybe_generate_autopilot_reply(provider, args, chat_id, chat_filter, goal)
+        if not responded_immediately:
+            _record_autopilot_event(chat_id, "status", "Monitoring for new incoming messages.")
+        last_history, _, _, _, _, _, _, _ = provider.load_history(
+            chat_filter, limit=1, auto_select=True, chat_id=chat_id
+        )
+
+        while True:
+            with autopilot_lock:
+                if not autopilot_sessions.get(chat_id, {}).get("active"):
+                    break
+
+            await asyncio.sleep(5)
+
+            try:
+                current_history, _, label, _, context, _, guid, _ = provider.load_history(
+                    chat_filter, limit=1, auto_select=True, chat_id=chat_id
                 )
-                
-                if not last_is_me:
-                    from .prompts import build_prompt
-                    from .vision import describe_image
-                    
-                    # Basic extraction of last incoming message for prompt building
-                    lines = history_full.strip().split("\n")
-                    last_line = lines[-1]
-                    original_msg = last_line.split(": ", 1)[1] if ": " in last_line else last_line
-                    
-                    vibe_content = ""
-                    if os.path.exists(args.vibe):
-                        with open(args.vibe, "r") as f:
-                            vibe_content = f.read()
 
-                    prompt = build_prompt(
-                        original_msg, vibe_content, history_full, label, context, args.name,
-                        None, None, None, goal
-                    )
-                    
-                    reply = call_local_llm(prompt, args.model, args.backend)
-                    if "Error" not in reply:
-                        provider.send_message(label, reply, chat_id=guid)
-                
-                last_history = current_history
-        except Exception as e:
-            print(f"Error in autopilot loop for {chat_id}: {e}")
+                if current_history != last_history:
+                    _maybe_generate_autopilot_reply(provider, args, chat_id, chat_filter, goal)
+                    last_history = current_history
+            except Exception as e:
+                _record_autopilot_event(chat_id, "error", f"Monitor error: {str(e)[:120]}")
+                print(f"Error in autopilot loop for {chat_id}: {e}")
+    except asyncio.CancelledError:
+        pass
+    finally:
+        with autopilot_lock:
+            session = autopilot_sessions.get(chat_id)
+            if session and not session.get("active"):
+                autopilot_sessions.pop(chat_id, None)
+            elif session:
+                session["task"] = None
 
 @app.post("/api/autopilot/toggle")
-async def toggle_autopilot(req: AutopilotToggleRequest, background_tasks: BackgroundTasks):
-    # This is a placeholder chat_id resolution - in production we'd use the integer ID
-    # For now, we'll try to find the ID via resolve_chat_matches
-    from .database import resolve_chat_matches
-    matches = resolve_chat_matches(req.chat_filter, auto_select=True)
-    if not matches:
-        raise HTTPException(status_code=404, detail="Chat not found")
-    
-    chat_id = matches[0][1]
+async def toggle_autopilot(req: AutopilotToggleRequest):
+    chat_id = req.chat_id
     
     with autopilot_lock:
         if req.enabled:
-            if chat_id in autopilot_sessions and autopilot_sessions[chat_id]["active"]:
+            existing = autopilot_sessions.get(chat_id)
+            if existing and existing.get("active"):
                 return {"status": "already_active"}
-            
-            autopilot_sessions[chat_id] = {"active": True, "goal": req.goal}
-            background_tasks.add_task(_autopilot_loop, chat_id, req.chat_filter, req.goal)
+
+            task = asyncio.create_task(_autopilot_loop(chat_id, req.chat_filter, req.goal))
+            autopilot_sessions[chat_id] = {
+                "active": True,
+                "goal": req.goal,
+                "task": task,
+                "events": [{"type": "status", "message": "Auto starting..."}],
+                "transcript": [],
+            }
         else:
-            if chat_id in autopilot_sessions:
-                autopilot_sessions[chat_id]["active"] = False
+            existing = autopilot_sessions.get(chat_id)
+            if existing:
+                task = existing.get("task")
+                existing["active"] = False
+                if task and not task.done():
+                    task.cancel()
+                autopilot_sessions.pop(chat_id, None)
                 
     return {"status": "success", "enabled": req.enabled}
 
