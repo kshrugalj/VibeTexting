@@ -25,6 +25,8 @@ from .prompts import (
     build_prompt,
 )
 from .llm import call_local_llm, list_ollama_models, list_lmstudio_models, start_lmstudio_server, stop_lmstudio_server
+from .evals import score_vibe_match, print_vibe_score
+from .feedback import maybe_ask_feedback, load_feedback_notes
 from .utils import get_clipboard_text
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
@@ -216,6 +218,7 @@ def run_autopilot(args, config, chat_filter, vibe_content, goal, provider, sessi
 
                 print(f"{CLR_DIM}Generating autonomous reply...{CLR_RESET}")
                 
+                feedback_notes = load_feedback_notes()
                 prompt = build_prompt(
                     original_msg,
                     active_vibe_content,
@@ -226,7 +229,8 @@ def run_autopilot(args, config, chat_filter, vibe_content, goal, provider, sessi
                     None, # No user intent in auto mode
                     None, # No barebones answer
                     memories,
-                    goal
+                    goal,
+                    feedback_notes,
                 )
 
                 reply = call_local_llm(prompt, args.model or "llama3", args.backend or "auto")
@@ -243,6 +247,15 @@ def run_autopilot(args, config, chat_filter, vibe_content, goal, provider, sessi
                     time.sleep(total_delay)
 
                     print(f"{CLR_PRE}🤖 Sending reply:{CLR_RESET} {reply}")
+
+                    # --- Vibe Match Eval ---
+                    if active_vibe_content:
+                        try:
+                            vibe_score = score_vibe_match(reply, active_vibe_content)
+                            print_vibe_score(vibe_score)
+                        except Exception:
+                            pass
+
                     success = provider.send_message(label, reply, chat_id=cguid)
                     if success:
                         print(f"{CLR_DIM}✅ Sent successfully.{CLR_RESET}")
@@ -605,6 +618,7 @@ def main():
             model = getattr(args, "model", None) or "llama3"
             print(f"\n{CLR_DIM}Generating reply using {backend} ({model})...{CLR_RESET}")
 
+            feedback_notes = load_feedback_notes()
             prompt = build_prompt(
                 original,
                 vibe_content,
@@ -615,7 +629,8 @@ def main():
                 user_intent,
                 user_barebones_answer,
                 memories,
-                goal
+                goal,
+                feedback_notes,
             )
             reply = call_local_llm(prompt, model, backend)
 
@@ -626,11 +641,22 @@ def main():
             print(f"{CLR_VIBE}{'='*40}{CLR_RESET}")
 
             if "Error" not in reply:
+                # --- Vibe Match Eval ---
+                if vibe_content:
+                    try:
+                        vibe_score = score_vibe_match(reply, vibe_content)
+                        print_vibe_score(vibe_score)
+                    except Exception:
+                        pass
+
                 try:
                     subprocess.run(['pbcopy'], input=reply, encoding='utf-8')
                     print(f"{CLR_DIM}(Copied to clipboard! 📋){CLR_RESET}")
                 except Exception:
                     pass
+
+                # --- Random feedback prompt (~25% chance) ---
+                maybe_ask_feedback(reply)
 
             print()
 
