@@ -137,6 +137,7 @@ def build_prompt(
     user_barebones_answer: Optional[str] = None,
     memories: Optional[str] = None,
     goal: Optional[str] = None,
+    feedback_notes: Optional[str] = None,
 ) -> str:
     # 1. Start with the core instructions
     system_setup = "You are an AI assistant helping someone respond to a text message."
@@ -188,12 +189,19 @@ def build_prompt(
     if memories:
         memory_block = f"\n\nImportant memories from past conversations:\n{memories}"
 
+    feedback_block = ""
+    if feedback_notes:
+        feedback_block = (
+            f"\n\nStyle corrections from past feedback — apply these:\n"
+            f"{feedback_notes}"
+        )
+
     goal_block = ""
     if goal:
         goal_block = f"\n\nYour overarching GOAL for this conversation is: {goal}.\n" \
                      f"Steer the conversation naturally towards this outcome."
 
-    return f"""{system_setup}{identity_block}{history_block}{memory_block}{goal_block}{intent_block}
+    return f"""{system_setup}{identity_block}{history_block}{memory_block}{feedback_block}{goal_block}{intent_block}
 
 Incoming message: "{original}"
 
