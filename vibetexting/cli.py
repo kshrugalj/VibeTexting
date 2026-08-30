@@ -28,6 +28,7 @@ from .llm import call_local_llm, list_ollama_models, list_lmstudio_models, start
 from .evals import score_vibe_match, print_vibe_score
 from .feedback import maybe_ask_feedback, load_feedback_notes
 from .utils import get_clipboard_text
+from .wrapped import get_global_wrapped
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.formatted_text import HTML, ANSI
@@ -53,10 +54,312 @@ def print_help():
     print(f"  {CLR_PRE}/goal [text]{CLR_RESET}   - Set a conversation goal (steers AI automatically)")
     print(f"  {CLR_PRE}/auto{CLR_RESET}           - Enter Auto-Pilot mode (monitors and replies automatically)")
     print(f"  {CLR_PRE}/vibe [path]{CLR_RESET}   - Switch vibe profile file")
+    print(f"  {CLR_PRE}/wrapped [flags]{CLR_RESET} - Your Wrapped — global stats about you (default: 2026)")
     print(f"  {CLR_PRE}/paste{CLR_RESET}        - Use text from clipboard as message")
     print(f"  {CLR_PRE}/help{CLR_RESET}         - Show this menu")
     print(f"  {CLR_PRE}exit{CLR_RESET} or {CLR_PRE}quit{CLR_RESET}  - Exit VibeText")
     print(f"\nJust type your message and press Enter to generate a reply.")
+    print(f"{CLR_DIM}Tip: /wrapped --help for all Wrapped options (year, range, all-time).{CLR_RESET}")
+
+
+def print_wrapped_help():
+    print(f"\n{CLR_VIBE}--- Wrapped Help (/wrapped) ---{CLR_RESET}")
+    print(f"  {CLR_BOLD}Your Wrapped — fun, shareable story about your texting. 100% local.{CLR_RESET}")
+    print(f"\n  {CLR_PRE}Usage:{CLR_RESET}")
+    print(f"    /wrapped                    -> 2026 (default)")
+    print(f"    /wrapped --year 2024        -> single year")
+    print(f"    /wrapped --year all         -> all time since your first text")
+    print(f"    /wrapped --all              -> same as --year all")
+    print(f"    /wrapped --from 2022 --to 2024  -> range inclusive")
+    print(f"    /wrapped --range 2022-2024  -> same as above")
+    print(f"    /wrapped --from 2022        -> 2022 to now")
+    print(f"    /wrapped --to 2023          -> beginning to 2023")
+    print(f"    /wrapped 2024               -> shorthand for --year 2024")
+    print(f"\n  {CLR_PRE}Flags:{CLR_RESET}")
+    print(f"    --year YYYY | all           single year or all-time")
+    print(f"    --from YYYY                 start year (inclusive)")
+    print(f"    --to YYYY                   end year (inclusive)")
+    print(f"    --range YYYY-YYYY           start-end shorthand")
+    print(f"    --all                       all-time alias")
+    print(f"    --cache                     enable caching (saves to ~/.vibetexting/wrapped_cache/)")
+    print(f"    --no-cache                  disable caching (default)")
+    print(f"    --help, -h                  show this help")
+    print(f"\n  {CLR_PRE}Examples:{CLR_RESET}")
+    print(f"    /wrapped")
+    print(f"    /wrapped --year 2024 --cache")
+    print(f"    /wrapped --range 2022-2024 --cache")
+    print(f"    /wrapped --year all --no-cache")
+    print(f"\n  {CLR_DIM}Cache is optional and off by default. Add --cache to save/load from wrapped_cache for faster repeat runs.{CLR_RESET}")
+    print(f"\n  Cards: Volume • Circle • Prime Time • Signature • Streaks • Loyal One • Day One")
+
+
+def _parse_wrapped_args(arg_str: str):
+    """
+    Parse /wrapped flags.
+    Returns (year_from, year_to, use_cache, show_help, error_msg)
+    year_from/year_to are ints or None. Both None = all-time.
+    Default if no args: 2026, 2026, no cache.
+    """
+    args = arg_str.strip().split() if arg_str.strip() else []
+    if not args:
+        return 2026, 2026, False, False, None
+    # help check
+    if any(a in ("--help", "-h") for a in args):
+        return None, None, False, True, None
+    year = None
+    year_from = None
+    year_to = None
+    use_all = False
+    use_cache = False
+    # Track explicit cache flags; default off
+    cache_tok_seen = False
+    i = 0
+    while i < len(args):
+        tok = args[i]
+        if tok == "--year" and i + 1 < len(args):
+            val = args[i + 1]
+            if val.lower() == "all":
+                use_all = True
+            else:
+                try:
+                    year = int(val)
+                except ValueError:
+                    return None, None, False, False, f"Invalid year '{val}'"
+            i += 2
+        elif tok == "--all":
+            use_all = True
+            i += 1
+        elif tok == "--cache":
+            use_cache = True
+            cache_tok_seen = True
+            i += 1
+        elif tok == "--no-cache":
+            use_cache = False
+            cache_tok_seen = True
+            i += 1
+        elif tok == "--from" and i + 1 < len(args):
+            try:
+                year_from = int(args[i + 1])
+            except ValueError:
+                return None, None, False, False, f"Invalid --from year '{args[i+1]}'"
+            i += 2
+        elif tok == "--to" and i + 1 < len(args):
+            try:
+                year_to = int(args[i + 1])
+            except ValueError:
+                return None, None, False, False, f"Invalid --to year '{args[i+1]}'"
+            i += 2
+        elif tok == "--range" and i + 1 < len(args):
+            val = args[i + 1]
+            if "-" not in val:
+                return None, None, False, False, f"Invalid --range '{val}' (expected YYYY-YYYY)"
+            a, b = val.split("-", 1)
+            try:
+                year_from = int(a.strip())
+                year_to = int(b.strip())
+            except ValueError:
+                return None, None, False, False, f"Invalid --range '{val}'"
+            i += 2
+        elif tok.startswith("--"):
+            return None, None, False, False, f"Unknown flag '{tok}'"
+        else:
+            # positional: year or all
+            if tok.lower() == "all":
+                use_all = True
+            else:
+                try:
+                    year = int(tok)
+                except ValueError:
+                    return None, None, False, False, f"Unknown argument '{tok}'"
+            i += 1
+    if use_all:
+        return None, None, use_cache, False, None
+    if year is not None:
+        if year_from is not None or year_to is not None:
+            return None, None, False, False, "Don't combine --year with --from/--to/--range"
+        return year, year, use_cache, False, None
+    if year_from is not None or year_to is not None:
+        if year_from is not None and year_to is not None and year_from > year_to:
+            return None, None, False, False, f"--from {year_from} is after --to {year_to}"
+        return year_from, year_to, use_cache, False, None
+    # fallback (shouldn't reach due to empty check)
+    return 2026, 2026, use_cache, False, None
+
+
+def _print_wrapped_story(data: dict, session=None):
+    if data.get("error"):
+        print(f"{CLR_ERR}Wrapped error: {data['error']}{CLR_RESET}")
+        return
+    range_label = data.get("range_label", "2026")
+    volume = data.get("volume", {})
+    circle = data.get("circle", {})
+    prime = data.get("prime_time", {})
+    sig = data.get("signature", {})
+    streaks = data.get("streaks", {})
+    loyal = data.get("loyal_one", {})
+    day_one = data.get("day_one", {})
+
+    def _pause():
+        try:
+            if session:
+                session.prompt(ANSI(f"{CLR_DIM}Press Enter for next card…{CLR_RESET} "))
+            else:
+                input(f"{CLR_DIM}Press Enter for next card…{CLR_RESET} ")
+        except (KeyboardInterrupt, EOFError):
+            print()
+            raise KeyboardInterrupt
+
+    total_in_range = circle.get("total_messages_in_range", volume.get("total_in_range", 0))
+    # Header
+    print(f"\n{CLR_VIBE}{'═'*52}{CLR_RESET}")
+    print(f"{CLR_BOLD}  🎁  YOUR WRAPPED — {range_label}  🎁{CLR_RESET}")
+    print(f"{CLR_DIM}  {data.get('generated_at','')} • 100% local • {total_in_range} msgs in range{CLR_RESET}")
+    print(f"{CLR_VIBE}{'═'*52}{CLR_RESET}")
+
+    # Card 1: Volume
+    print(f"\n{CLR_BOLD}[1/7]  YOUR VOLUME{CLR_RESET}")
+    print(f"{CLR_DIM}{'─'*52}{CLR_RESET}")
+    sent = volume.get("sent", 0)
+    if sent == 0 and total_in_range == 0:
+        print(f"  No messages in this range.")
+    else:
+        print(f"  {CLR_PRE}{sent:,}{CLR_RESET} texts sent by you")
+        print(f"  {CLR_DIM}{total_in_range:,} total messages in this period (you + them){CLR_RESET}")
+        if sent > 0:
+            print(f"  {CLR_DIM}That's about {sent//365 if sent>365 else sent} per day on average{CLR_RESET}")
+    try:
+        _pause()
+    except KeyboardInterrupt:
+        return
+
+    # Card 2: Circle
+    print(f"\n{CLR_BOLD}[2/7]  YOUR CIRCLE{CLR_RESET}")
+    print(f"{CLR_DIM}{'─'*52}{CLR_RESET}")
+    distinct = circle.get("distinct_chats_you_texted", 0)
+    top = circle.get("top_chats", [])
+    print(f"  {CLR_PRE}{distinct}{CLR_RESET} people you texted")
+    if top:
+        print(f"  {CLR_DIM}Top conversations by volume:{CLR_RESET}")
+        for idx, ch in enumerate(top, 1):
+            print(f"    {idx}. {CLR_BOLD}{ch['label']}{CLR_RESET} — {ch['count']:,} msgs")
+    else:
+        print(f"  {CLR_DIM}No conversations found in this range{CLR_RESET}")
+    try:
+        _pause()
+    except KeyboardInterrupt:
+        return
+
+    # Card 3: Prime Time
+    print(f"\n{CLR_BOLD}[3/7]  YOUR PRIME TIME{CLR_RESET}")
+    print(f"{CLR_DIM}{'─'*52}{CLR_RESET}")
+    peak_h = prime.get("peak_hour_label")
+    peak_h_cnt = prime.get("peak_hour_count", 0)
+    peak_wd = prime.get("peak_weekday")
+    late = sig.get("late_night_count", 0)
+    if peak_h:
+        print(f"  Peak hour: {CLR_PRE}{peak_h}{CLR_RESET} ({peak_h_cnt} msgs)")
+        print(f"  Peak day:  {CLR_PRE}{peak_wd}{CLR_RESET} ({prime.get('peak_weekday_count',0)} msgs)")
+        # tiny histogram top 3 hours
+        hist = prime.get("hour_histogram", {})
+        if hist:
+            top_hours = sorted(hist.items(), key=lambda x: x[1], reverse=True)[:3]
+            # format
+            def _fh(h):
+                suf = "am" if int(h) < 12 else "pm"
+                hr = int(h) % 12 or 12
+                return f"{hr}{suf}"
+            print(f"  {CLR_DIM}Top hours: {', '.join(f'{_fh(h)}:{c}' for h,c in top_hours)}{CLR_RESET}")
+        print(f"  {CLR_DIM}Late night (12-4am): {late} texts{CLR_RESET}")
+    else:
+        print(f"  {CLR_DIM}No timing data{CLR_RESET}")
+    try:
+        _pause()
+    except KeyboardInterrupt:
+        return
+
+    # Card 4: Signature
+    print(f"\n{CLR_BOLD}[4/7]  YOUR SIGNATURE{CLR_RESET}")
+    print(f"{CLR_DIM}{'─'*52}{CLR_RESET}")
+    avg = sig.get("avg_words", 0)
+    med = sig.get("median_words", 0)
+    lower = sig.get("lowercase_pct", 0)
+    emojis = sig.get("top_emojis", [])
+    epm = sig.get("emoji_per_msg", 0)
+    print(f"  Avg length: {CLR_PRE}{avg} words/msg{CLR_RESET} (median {med})")
+    print(f"  Lowercase style: {CLR_PRE}{lower}%{CLR_RESET} of your msgs")
+    if emojis:
+        emo_str = "  ".join(f"{e['emoji']}×{e['count']}" for e in emojis[:3])
+        print(f"  Signature emojis: {emo_str}  {CLR_DIM}({epm} per msg){CLR_RESET}")
+    else:
+        print(f"  {CLR_DIM}No emoji — you're pure text{CLR_RESET}")
+    try:
+        _pause()
+    except KeyboardInterrupt:
+        return
+
+    # Card 5: Streaks (two-way)
+    print(f"\n{CLR_BOLD}[5/7]  STREAKS (two-way days){CLR_RESET}")
+    print(f"{CLR_DIM}{'─'*52}{CLR_RESET}")
+    print(f"  {CLR_DIM}Counts only days where BOTH of you texted{CLR_RESET}")
+    longest = streaks.get("longest", 0)
+    longest_label = streaks.get("longest_chat_label")
+    l_start = streaks.get("longest_start")
+    l_end = streaks.get("longest_end")
+    cur = streaks.get("current", 0)
+    cur_label = streaks.get("current_chat_label")
+    if longest and longest > 1:
+        print(f"  Longest: {CLR_PRE}{longest} days{CLR_RESET} with {CLR_BOLD}{longest_label}{CLR_RESET}")
+        print(f"           {CLR_DIM}{l_start} → {l_end}{CLR_RESET}")
+    elif longest == 1:
+        print(f"  Longest: 1 day with {longest_label} {CLR_DIM}(no multi-day streak yet){CLR_RESET}")
+    else:
+        print(f"  {CLR_DIM}No two-way streaks in this range{CLR_RESET}")
+    if cur and cur > 0:
+        print(f"  Current: {CLR_PRE}{cur} days{CLR_RESET} with {cur_label} {CLR_DIM}(ending today){CLR_RESET}")
+    else:
+        print(f"  {CLR_DIM}No active streak today{CLR_RESET}")
+    try:
+        _pause()
+    except KeyboardInterrupt:
+        return
+
+    # Card 6: Loyal One
+    print(f"\n{CLR_BOLD}[6/7]  YOUR LOYAL ONE{CLR_RESET}")
+    print(f"{CLR_DIM}{'─'*52}{CLR_RESET}")
+    print(f"  {CLR_DIM}Ranked by days you BOTH talked{CLR_RESET}")
+    top3 = loyal.get("top3", [])
+    if top3:
+        for idx, entry in enumerate(top3, 1):
+            marker = "→ " if idx == 1 else "  "
+            print(f"  {marker}{idx}. {CLR_BOLD}{entry['label']}{CLR_RESET} — {entry['days']} two-way days")
+        runner = loyal.get("runner_up")
+        if runner:
+            print(f"  {CLR_DIM}Runner-up was close!{CLR_RESET}")
+    else:
+        print(f"  {CLR_DIM}No two-way days in this range{CLR_RESET}")
+    try:
+        _pause()
+    except KeyboardInterrupt:
+        return
+
+    # Card 7: Day One Flex
+    print(f"\n{CLR_BOLD}[7/7]  DAY ONE FLEX{CLR_RESET}")
+    print(f"{CLR_DIM}{'─'*52}{CLR_RESET}")
+    first_date = day_one.get("first_message_date")
+    first_text = day_one.get("first_message_text")
+    days_since = day_one.get("days_since")
+    if first_date:
+        print(f"  First text in range: {CLR_PRE}{first_date}{CLR_RESET}")
+        print(f"  {CLR_DIM}“{first_text}”{CLR_RESET}")
+        if days_since is not None:
+            print(f"  {CLR_DIM}{days_since} days ago{CLR_RESET}")
+        print(f"  {CLR_DIM}Range: {range_label}{CLR_RESET}")
+    else:
+        print(f"  {CLR_DIM}No messages in this range to show first text{CLR_RESET}")
+
+    print(f"\n{CLR_VIBE}{'═'*52}{CLR_RESET}")
+    print(f"{CLR_BOLD}  That's your Wrapped — {range_label}!{CLR_RESET} {CLR_DIM}Run /wrapped --help for other years/ranges{CLR_RESET}")
+    print(f"{CLR_VIBE}{'═'*52}{CLR_RESET}\n")
 
 def prompt_setup_config() -> dict:
     print(f"\n{CLR_VIBE}--- VibeText Setup ---{CLR_RESET}")
@@ -287,6 +590,14 @@ def main():
     parser.add_argument("--full", action="store_true", help="Use the entire chat history as context (warning: may exceed model limit)")
     parser.add_argument("--list-groups", action="store_true", help="List recent group chats and exit")
     parser.add_argument("--dashboard", action="store_true", help="Launch the local Ghost Dashboard (Web UI)")
+    parser.add_argument("--wrapped", action="store_true", help="Show your Wrapped (global stats) and exit — default 2026. See /wrapped --help for flags")
+    parser.add_argument("--year", default=None, help="Year for --wrapped (YYYY or 'all')")
+    parser.add_argument("--from", dest="from_year", default=None, help="Start year for --wrapped range")
+    parser.add_argument("--to", dest="to_year", default=None, help="End year for --wrapped range")
+    parser.add_argument("--range", dest="range_year", default=None, help="Range for --wrapped (YYYY-YYYY)")
+    parser.add_argument("--all", dest="all_flag", action="store_true", help="All-time for --wrapped (alias for --year all)")
+    parser.add_argument("--cache", dest="cache_flag", action="store_true", help="Enable caching for --wrapped (saves to wrapped_cache)")
+    parser.add_argument("--no-cache", dest="no_cache_flag", action="store_true", help="Disable caching for --wrapped (default)")
     args = parser.parse_args()
 
     if args.dashboard:
@@ -319,6 +630,73 @@ def main():
             print(f"  {idx}. {group['label']} ({group['participant_count']} participants)")
         return 0
 
+    if getattr(args, "wrapped", False):
+        # Direct CLI mode: vibetexting --wrapped [--year YYYY|all] [--from YYYY] [--to YYYY] [--range YYYY-YYYY] [--all] [--cache/--no-cache]
+        y_from = y_to = None
+        err = None
+        use_cache = False
+        if getattr(args, "cache_flag", False) and getattr(args, "no_cache_flag", False):
+            print(f"{CLR_ERR}Wrapped error: Can't use both --cache and --no-cache{CLR_RESET}")
+            return 1
+        if getattr(args, "cache_flag", False):
+            use_cache = True
+        elif getattr(args, "no_cache_flag", False):
+            use_cache = False
+        # Build synthetic arg_str from parsed args
+        if getattr(args, "all_flag", False):
+            y_from = y_to = None
+        elif getattr(args, "range_year", None):
+            val = getattr(args, "range_year")
+            if val and "-" in str(val):
+                a, b = str(val).split("-", 1)
+                try:
+                    y_from = int(a.strip()); y_to = int(b.strip())
+                    if y_from > y_to:
+                        err = f"--range {val} has start after end"
+                except ValueError:
+                    err = f"Invalid --range '{val}'"
+            else:
+                err = f"Invalid --range '{val}' (expected YYYY-YYYY)"
+        elif getattr(args, "from_year", None) is not None or getattr(args, "to_year", None) is not None:
+            try:
+                if getattr(args, "from_year", None) is not None:
+                    y_from = int(getattr(args, "from_year"))
+                if getattr(args, "to_year", None) is not None:
+                    y_to = int(getattr(args, "to_year"))
+                if y_from is not None and y_to is not None and y_from > y_to:
+                    err = f"--from {y_from} is after --to {y_to}"
+            except ValueError as e:
+                err = str(e)
+        elif getattr(args, "year", None) is not None:
+            val = getattr(args, "year")
+            if isinstance(val, str) and val.lower() == "all":
+                y_from = y_to = None
+            else:
+                try:
+                    yv = int(val)
+                    y_from = y_to = yv
+                except ValueError:
+                    err = f"Invalid --year '{val}'"
+        else:
+            y_from = y_to = 2026
+        if err:
+            print(f"{CLR_ERR}Wrapped error: {err}{CLR_RESET}")
+            print(f"{CLR_DIM}Try: vibetexting --wrapped --year 2024  or  --range 2022-2024  or  --all [--cache]{CLR_RESET}")
+            return 1
+        print(f"{CLR_DIM}Computing your Wrapped…{CLR_RESET} {CLR_DIM}(cache={'on' if use_cache else 'off'}){CLR_RESET}")
+        data = get_global_wrapped(year_from=y_from, year_to=y_to, use_cache=use_cache)
+        # Non-interactive: print without pauses (session=None, but _print handles no-pause if we trick)
+        # For direct CLI we print all cards without Enter pauses by monkey-patching _pause
+        import builtins
+        orig_input = builtins.input
+        builtins.input = lambda *a, **k: ""
+        # Also patch prompt_toolkit session if needed — _print_wrapped_story will call input fallback
+        try:
+            _print_wrapped_story(data, session=None)
+        finally:
+            builtins.input = orig_input
+        return 0
+
     print(f"\n{CLR_VIBE}--- VibeText CLI (Local Mode) ---{CLR_RESET}")
     if config.get("__path__"):
         print(f"{CLR_DIM}Loaded defaults from {config['__path__']}{CLR_RESET}")
@@ -346,7 +724,7 @@ def main():
     # Set up command completer for prompt-toolkit
     commands = [
         "/chat", "/groups", "/model", "/models", "/limit", "/delay", "/full",
-        "/goal", "/auto", "/vibe", "/paste", "/help", "exit", "quit"
+        "/goal", "/auto", "/vibe", "/wrapped", "/paste", "/help", "exit", "quit"
     ]
     completer = WordCompleter(commands, ignore_case=True)
     session = PromptSession(completer=completer)
@@ -398,6 +776,30 @@ def main():
 
                 if cmd == '/help':
                     print_help()
+                    first_run = False
+                    continue
+
+                if cmd.startswith('/wrapped'):
+                    # Extract args after /wrapped
+                    arg_str = original[8:].strip()  # len("/wrapped")==8
+                    y_from, y_to, use_cache, show_help, err = _parse_wrapped_args(arg_str)
+                    if err:
+                        print(f"{CLR_ERR}Wrapped error: {err}{CLR_RESET}")
+                        print(f"{CLR_DIM}Try /wrapped --help for options{CLR_RESET}")
+                        first_run = False
+                        continue
+                    if show_help:
+                        print_wrapped_help()
+                        first_run = False
+                        continue
+                    print(f"{CLR_DIM}Computing your Wrapped…{CLR_RESET} {CLR_DIM}(cache={'on' if use_cache else 'off'}){CLR_RESET}")
+                    try:
+                        data = get_global_wrapped(year_from=y_from, year_to=y_to, use_cache=use_cache)
+                        _print_wrapped_story(data, session=session)
+                    except KeyboardInterrupt:
+                        print(f"\n{CLR_DIM}Wrapped interrupted.{CLR_RESET}")
+                    except Exception as e:
+                        print(f"{CLR_ERR}Failed to build Wrapped: {e}{CLR_RESET}")
                     first_run = False
                     continue
 
