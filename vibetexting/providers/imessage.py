@@ -3,6 +3,16 @@ from ..database import load_recent_chat_history, list_recent_chats, search_relev
 from ..utils import send_imessage
 from typing import List, Optional, Tuple, Dict
 
+def _as_rowid(chat_id):
+    """Chat ids cross the API boundary as strings; chat.db keys chats by rowid."""
+    if chat_id is None or isinstance(chat_id, int):
+        return chat_id
+    try:
+        return int(str(chat_id))
+    except (TypeError, ValueError):
+        return chat_id
+
+
 class IMessageProvider(BaseMessagingProvider):
     """
     macOS iMessage implementation using SQLite and AppleScript.
@@ -15,7 +25,7 @@ class IMessageProvider(BaseMessagingProvider):
             chat_filter, 
             limit, 
             auto_select=kwargs.get("auto_select", False), 
-            chat_id=kwargs.get("chat_id")
+            chat_id=_as_rowid(kwargs.get("chat_id"))
         )
 
     def send_message(self, recipient: str, text: str, **kwargs) -> bool:

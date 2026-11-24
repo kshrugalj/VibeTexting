@@ -15,7 +15,7 @@ from .database import (
     get_latest_message_date,
     get_latest_message_for_chat
 )
-from .providers.imessage import IMessageProvider
+from .providers import get_provider, resolve_provider_name
 from .prompts import (
     needs_manual_response,
     is_question_message,
@@ -563,7 +563,7 @@ def run_autopilot(args, config, chat_filter, vibe_content, goal, provider, sessi
                     if success:
                         print(f"{CLR_DIM}✅ Sent successfully.{CLR_RESET}")
                     else:
-                        print(f"{CLR_ERR}❌ Failed to send via AppleScript.{CLR_RESET}")
+                        print(f"{CLR_ERR}❌ Failed to send the message.{CLR_RESET}")
                 else:
                     print(f"{CLR_ERR}LLM Error: {reply}{CLR_RESET}")
 
@@ -581,6 +581,7 @@ def main():
     parser.add_argument("--setup", action="store_true", help="Run interactive setup to create your default config")
     parser.add_argument("--model", default=None, help="Model name to use")
     parser.add_argument("--backend", choices=["auto", "ollama", "lmstudio"], default=None, help="LLM backend to use")
+    parser.add_argument("--provider", choices=["imessage", "whatsapp"], default=None, help="Messaging platform to use (default: imessage or your config)")
     parser.add_argument("--name", help="Optional name for identity questions")
     parser.add_argument("--intent-mode", choices=sorted(INTENT_MODES), help="How to handle message intent")
     parser.add_argument("--vibe", help="Path to your vibe profile")
@@ -617,8 +618,8 @@ def main():
     config = load_user_config()
     args = merge_runtime_settings(args, config)
 
-    # Initialize the messaging provider (Default to iMessage for now)
-    provider = IMessageProvider()
+    # Initialize the configured messaging provider (iMessage by default)
+    provider = get_provider(getattr(args, "provider", None))
 
     if args.list_groups:
         groups = provider.get_recent_chats(limit=20)
@@ -698,6 +699,7 @@ def main():
         return 0
 
     print(f"\n{CLR_VIBE}--- VibeText CLI (Local Mode) ---{CLR_RESET}")
+    print(f"{CLR_DIM}Provider: {resolve_provider_name(getattr(args, 'provider', None))}{CLR_RESET}")
     if config.get("__path__"):
         print(f"{CLR_DIM}Loaded defaults from {config['__path__']}{CLR_RESET}")
     print(f"{CLR_DIM}Type {CLR_RESET}/help{CLR_DIM} to see available commands.{CLR_RESET}")

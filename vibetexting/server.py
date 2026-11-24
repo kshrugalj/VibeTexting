@@ -4,7 +4,8 @@ import os
 from typing import List, Dict, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from .providers.imessage import IMessageProvider
+from .providers import get_provider as create_provider
+from .providers.base import BaseMessagingProvider
 from .llm import call_local_llm
 from .config import load_user_config
 from fastapi.staticfiles import StaticFiles
@@ -23,6 +24,16 @@ async def add_no_cache_header(request, call_next):
 # {chat_id: {"task": asyncio.Task | None, "goal": str, "active": bool}}
 autopilot_sessions = {}
 autopilot_lock = threading.Lock()
+
+# One provider per server process: platform selection is static and providers
+# keep small amounts of state (e.g. whether the WhatsApp QR was shown).
+_provider: Optional[BaseMessagingProvider] = None
+
+def get_provider() -> BaseMessagingProvider:
+    global _provider
+    if _provider is None:
+        _provider = create_provider()
+    return _provider
 AUTOPILOT_EVENT_LIMIT = 12
 AUTOPILOT_TRANSCRIPT_LIMIT = 16
 
@@ -32,12 +43,12 @@ class MessageRequest(BaseModel):
     chat_guid: Optional[str] = None
 
 class AutopilotToggleRequest(BaseModel):
-    chat_id: int
+    chat_id: str
     chat_filter: str
     goal: str
     enabled: bool
 
-def _record_autopilot_event(chat_id: int, event_type: str, message: str):
+def _record_autopilot_event(chat_id: str, event_type: str, message: str):
     with autopilot_lock:
         session = autopilot_sessions.get(chat_id)
         if not session:
@@ -47,7 +58,7 @@ def _record_autopilot_event(chat_id: int, event_type: str, message: str):
         if len(events) > AUTOPILOT_EVENT_LIMIT:
             del events[:-AUTOPILOT_EVENT_LIMIT]
 
-def _record_autopilot_transcript(chat_id: int, speaker: str, message: str):
+def _record_autopilot_transcript(chat_id: str, speaker: str, message: str):
     cleaned = " ".join((message or "").split()).strip()
     if not cleaned:
         return
@@ -83,12 +94,14 @@ def _build_autopilot_summary(session: Dict) -> str:
 
 @app.get("/api/chats")
 async def get_chats():
-    provider = IMessageProvider()
-    return provider.get_recent_chats(limit=50)
+    provider = get_provider()
+    chats = provider.get_recent_chats(limit=50)
+    # Chat ids are platform ids (iMessage rowids, WhatsApp jids): keep them strings.
+    return [{**chat, "chat_id": str(chat["chat_id"])} for chat in chats]
 
 @app.get("/api/chats/{chat_id}/history")
-async def get_history(chat_id: int, chat_filter: str, limit: int = 20):
-    provider = IMessageProvider()
+async def get_history(chat_id: str, chat_filter: str, limit: int = 20):
+    provider = get_provider()
     history, total, label, is_group, context, cid, guid, last_is_from_me = provider.load_history(
         chat_filter, limit=limit, auto_select=True, chat_id=chat_id
     )
@@ -102,9 +115,12 @@ async def get_history(chat_id: int, chat_filter: str, limit: int = 20):
     }
 
 @app.post("/api/chats/{chat_id}/send")
-async def send_message(chat_id: int, req: MessageRequest):
-    provider = IMessageProvider()
-    success = provider.send_message(req.recipient_label, req.text, chat_id=req.chat_guid)
+async def send_message(chat_id: str, req: MessageRequest):
+    provider = get_provider()
+    target = req.chat_guid
+    if not target and getattr(provider, "accepts_platform_chat_id", False):
+        target = chat_id
+    success = provider.send_message(req.recipient_label, req.text, chat_id=target)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to send message")
     return {"status": "success"}
@@ -131,9 +147,9 @@ def _load_vibe_content(vibe_path: Optional[str]) -> str:
     return ""
 
 def _maybe_generate_autopilot_reply(
-    provider: IMessageProvider,
+    provider: BaseMessagingProvider,
     args,
-    chat_id: int,
+    chat_id: str,
     chat_filter: str,
     goal: str,
 ) -> bool:
@@ -179,9 +195,9 @@ def _maybe_generate_autopilot_reply(
     _record_autopilot_transcript(chat_id, "auto", reply)
     return True
 
-async def _autopilot_loop(chat_id: int, chat_filter: str, goal: str):
+async def _autopilot_loop(chat_id: str, chat_filter: str, goal: str):
     """Background polling loop for a specific chat."""
-    provider = IMessageProvider()
+    provider = get_provider()
     try:
         # Initial state
         last_history, _, _, _, _, _, _, _ = provider.load_history(

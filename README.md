@@ -7,7 +7,7 @@ VibeTexting V2.0 is a professional-grade, 100% local AI messaging assistant. Re-
 ## What's New in V2.0 🚀
 
 ### 🔌 Decoupled Provider Architecture
-VibeTexting is no longer just for iMessage. The core engine is now completely abstracted via a plug-and-play system for different platforms (WhatsApp and Signal coming soon).
+VibeTexting is no longer just for iMessage. The core engine is abstracted behind a plug-and-play provider system, and **WhatsApp support now ships** alongside iMessage (Signal coming soon).
 
 ### 👻 Ghost Dashboard (V2.0 Mission Control)
 A local Web Dashboard built with **FastAPI** and **React** for batch-managing multiple threads and monitoring Auto-Pilot status in real-time.
@@ -35,6 +35,7 @@ Native macOS Contacts sync for relationship identification and improved name res
 ### 1. Prerequisites
 - **macOS** (supports iMessage via AppleScript).
 - **Ollama** (for RAG and Vision) or **LM Studio**.
+- **Node.js 18+** (only for WhatsApp support).
 - **Full Disk Access**: Terminal/IDE requires this to read `chat.db`.
 
 ### 2. Setup
@@ -72,6 +73,38 @@ Inside the CLI, use the `/auto` command to let the AI monitor and respond to a s
 
 ---
 
+## WhatsApp Support
+
+WhatsApp is linked as a companion device through a small local bridge (`vibetexting-whatsapp/`, Node + Baileys). Chats, media and link credentials stay on this machine; the bridge only listens on `127.0.0.1`.
+
+```bash
+# one-time: install the bridge dependencies
+cd vibetexting-whatsapp && npm install && cd ..
+
+# use WhatsApp for this run
+vibetexting --provider whatsapp
+```
+
+On the first run a QR code is printed. In WhatsApp open **Settings → Linked devices → Link a device** and scan it. The link is stored in `~/.vibetexting/whatsapp_auth/` and reused afterwards.
+
+To make WhatsApp the default platform, add it to your config:
+
+```json
+{
+  "provider": "whatsapp"
+}
+```
+
+How it fits together:
+
+- The bridge starts automatically when the provider is selected. Logs: `~/.vibetexting/whatsapp_bridge.log`.
+- Recent messages are cached in `~/.vibetexting/whatsapp_messages.jsonl`; downloaded images (used for vision) in `~/.vibetexting/whatsapp_media/`.
+- The dashboard (`vibetexting --dashboard`) follows the same provider setting, so Auto-Pilot works on WhatsApp threads too.
+- `/wrapped` and ChromaDB semantic memory still read the iMessage database; WhatsApp memory search is keyword-based for now.
+- If the phone unlinks this device, remove `~/.vibetexting/whatsapp_auth/` and scan a new QR code.
+
+---
+
 ## CLI Commands
 
 | Command | Description |
@@ -84,6 +117,14 @@ Inside the CLI, use the `/auto` command to let the AI monitor and respond to a s
 | `/vibe [path]` | Switch to a different vibe profile. |
 | `/help` | Show all available commands. |
 
+### Platform selection
+
+| Flag / setting | Description |
+|----------------|-------------|
+| `--provider imessage` | Use iMessage for this run (default). |
+| `--provider whatsapp` | Use WhatsApp for this run. |
+| `"provider"` in `~/.vibetexting.json` | Default platform when no flag is passed. |
+
 ## Project Architecture
 
 ```
@@ -95,6 +136,7 @@ VibeTexting/
 │   ├── vision.py      # Image analysis via local vision models
 │   ├── cli.py         # Main interactive loop
 │   └── prompts.py     # Vibe-matching prompt engineering
+├── vibetexting-whatsapp/ # Local WhatsApp bridge (Node + Baileys)
 ├── vibetexting-web/   # React Dashboard (Vite + Tailwind)
 └── PROJECT_PROFILE.md
 ```

@@ -7,6 +7,11 @@ class BaseMessagingProvider(ABC):
     Any new platform must implement these methods.
     """
 
+    #: Whether callers may pass a platform chat id (not just a chat GUID) as
+    #: ``chat_id`` when sending. Platforms whose chat id doubles as the send
+    #: target (WhatsApp jids) set this to True.
+    accepts_platform_chat_id = False
+
     @abstractmethod
     def load_history(self, chat_filter: str, limit: Optional[int] = None, **kwargs) -> Tuple:
         """Loads message history from the platform."""

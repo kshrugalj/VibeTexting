@@ -21,5 +21,5 @@ vibetexting = "vibetexting.cli:main"
 vibe-extract = "extract_imessage_vibe:main"
 
 [tool.setuptools]
-packages = ["vibetexting"]
+packages = ["vibetexting", "vibetexting.providers"]
 py-modules = ["extract_imessage_vibe"]

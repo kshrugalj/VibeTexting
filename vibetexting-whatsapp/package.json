@@ -1,0 +1,17 @@
+{
+  "name": "vibetexting-whatsapp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local WhatsApp bridge for VibeTexting (linked-device WebSocket, no browser)",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
+    "qrcode-terminal": "^0.12.0"
+  }
+}

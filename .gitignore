@@ -27,6 +27,10 @@ wheels/
 my_vibe_profile.txt
 my_chat_history.txt
 
+# WhatsApp bridge (Node)
+vibetexting-whatsapp/node_modules/
+vibetexting-whatsapp/.npm/
+
 # Tools
 .qwen/
 .gemini/

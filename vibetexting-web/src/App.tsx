@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 
 interface Chat {
-  chat_id: number;
+  chat_id: string;
   label: string;
   participant_count: number;
 }
 
 interface AutopilotStatus {
-  [chat_id: number]: {
+  [chat_id: string]: {
     active: boolean;
     goal: string;
     summary?: string;
@@ -31,7 +31,7 @@ function App() {
   const [autopilotStatus, setAutopilotStatus] = useState<AutopilotStatus>({});
   const [goal, setGoal] = useState("");
   const [chatLoadError, setChatLoadError] = useState<string | null>(null);
-  const [autopilotPendingChatId, setAutopilotPendingChatId] = useState<number | null>(null);
+  const [autopilotPendingChatId, setAutopilotPendingChatId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -102,10 +102,10 @@ function App() {
     }
   };
 
-  const fetchHistory = async (id: number, label: string) => {
+  const fetchHistory = async (id: string, label: string) => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/chats/${id}/history?chat_filter=${encodeURIComponent(label)}`);
+      const res = await fetch(`/api/chats/${encodeURIComponent(id)}/history?chat_filter=${encodeURIComponent(label)}`);
       const data = await res.json();
       setHistory(data.history);
     } catch (err) {
@@ -118,7 +118,7 @@ function App() {
   const sendMessage = async () => {
     if (!selectedChat || !message.trim()) return;
     try {
-      await fetch(`/api/chats/${selectedChat.chat_id}/send`, {
+      await fetch(`/api/chats/${encodeURIComponent(selectedChat.chat_id)}/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
